@@ -60,7 +60,3 @@ server {
 5. Webserver so konfigurieren, dass nur `public/` öffentlich erreichbar ist.
 
 Die Anwendung legt die Tabellen beim ersten Aufruf automatisch an.
-
-## Sicherheit
-
-Das Repository enthält keine Zugangsdaten. `config/config.php` ist ignoriert und bleibt lokal.

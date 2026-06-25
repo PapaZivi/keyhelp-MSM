@@ -60,7 +60,3 @@ server {
 5. Configure the web server so that only `public/` is publicly accessible.
 
 The application automatically creates the required tables on first access.
-
-## Security
-
-The repository does not contain credentials. `config/config.php` is ignored and remains local.
