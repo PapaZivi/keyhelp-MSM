@@ -1,22 +1,22 @@
-# KeyHelp Verwaltung
+# KeyHelp Management
 
-Zentrale PHP-Webanwendung fuer mehrere KeyHelp-Server.
+Central PHP web application for managing multiple KeyHelp servers.
 
-## Umfang im ersten Stand
+## Initial Scope
 
-- mehrere KeyHelp-Server lokal verwalten
-- Domains serveruebergreifend synchronisieren und lokalen Abrechnungsdaten zuordnen
-- Hostingpakete zentral anlegen und als Aktionen vormerken
-- Benutzer systemweit oder serverspezifisch vormerken
-- Aktionen werden erst gesammelt und per Sync nach Sichtpruefung ausgefuehrt
-- Sync stoppt beim ersten Serverfehler und protokolliert die Ursache
-- lokale Datenhaltung in MySQL
+- manage multiple KeyHelp servers locally
+- synchronize domains across servers and assign them to local billing data
+- centrally create hosting packages and queue them as actions
+- queue users system-wide or for specific servers
+- collect actions first and execute them via sync after manual review
+- stop synchronization at the first server error and log the cause
+- store local data in MySQL
 
-## Deployment als Webanwendung
+## Deployment as a Web Application
 
-Die Anwendung ist fuer Apache, Nginx oder einen vergleichbaren Webserver gedacht. Der DocumentRoot muss auf `public/` zeigen.
+The application is intended for Apache, Nginx, or a comparable web server. The document root must point to `public/`.
 
-Beispiel Apache-VHost:
+Example Apache vHost:
 
 ```apache
 <VirtualHost *:80>
@@ -30,7 +30,7 @@ Beispiel Apache-VHost:
 </VirtualHost>
 ```
 
-Beispiel Nginx:
+Example Nginx:
 
 ```nginx
 server {
@@ -53,14 +53,14 @@ server {
 
 ## Installation
 
-1. MySQL-Datenbank und Benutzer anlegen, z. B. `keyhelp_verwaltung`.
-2. `config/config.example.php` nach `config/config.php` kopieren.
-3. DB-Zugang, Admin-Passwort und KeyHelp-Server eintragen. Die KeyHelp-API nutzt standardmaessig den Header X-API-Key; bei abweichender Installation kann keyhelp.auth in der Config angepasst werden.
-4. PHP mit PDO-MySQL und cURL verwenden.
-5. Webserver so konfigurieren, dass nur `public/` oeffentlich erreichbar ist.
+1. Create a MySQL database and user, for example `keyhelp_verwaltung`.
+2. Copy `config/config.example.php` to `config/config.php`.
+3. Enter the database access data, admin password, and KeyHelp servers. By default, the KeyHelp API uses the `X-API-Key` header. If your installation differs, `keyhelp.auth` can be adjusted in the configuration.
+4. Use PHP with PDO-MySQL and cURL.
+5. Configure the web server so that only `public/` is publicly accessible.
 
-Die Anwendung legt die Tabellen beim ersten Aufruf automatisch an.
+The application automatically creates the required tables on first access.
 
-## Sicherheit
+## Security
 
-Das Repository enthaelt keine Zugangsdaten. `config/config.php` ist ignoriert und bleibt lokal.
+The repository does not contain credentials. `config/config.php` is ignored and remains local.
