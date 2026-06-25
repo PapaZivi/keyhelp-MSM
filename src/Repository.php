@@ -19,7 +19,17 @@ final class Repository
 
     public function domain(int $id): ?array
     {
-        $stmt = $this->pdo->prepare('SELECT d.*, s.name AS server_name FROM domains d JOIN servers s ON s.id = d.server_id WHERE d.id = ?');
+        $stmt = $this->pdo->prepare('
+            SELECT d.*, s.name AS server_name, duplicates.server_count AS duplicate_server_count
+            FROM domains d
+            JOIN servers s ON s.id = d.server_id
+            JOIN (
+                SELECT domain, COUNT(DISTINCT server_id) AS server_count
+                FROM domains
+                GROUP BY domain
+            ) duplicates ON duplicates.domain = d.domain
+            WHERE d.id = ?
+        ');
         $stmt->execute([$id]);
         $domain = $stmt->fetch();
         return $domain ?: null;
@@ -114,6 +124,13 @@ final class Repository
             return null;
         }
     }
+
+    public function deleteDomain(int $id): void
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM domains WHERE id = ?');
+        $stmt->execute([$id]);
+    }
+
     public function deleteDomainsExcept(int $serverId, array $domainNames): void
     {
         $domainNames = array_values(array_filter($domainNames));

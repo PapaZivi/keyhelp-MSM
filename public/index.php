@@ -98,7 +98,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
         if ($action === 'update_domain') {
             $repo->updateDomainBilling($_POST);
             $domain = $repo->domain((int)$_POST['id']);
-            echo json_encode(['ok' => true, 'message' => 'Domain gespeichert.', 'domain' => $domain], JSON_UNESCAPED_UNICODE);
+            echo json_encode([
+                'ok' => true,
+                'message' => '[Domain] ' . ($domain['domain'] ?? 'Unbekannt') . ': Gespeichert.',
+                'domain' => $domain,
+                'row_class' => domain_row_class($domain),
+                'status_html' => domain_status_html($domain),
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        if ($action === 'refresh_domain') {
+            $result = $sync->refreshDomain((int)$_POST['id']);
+            if (($result['status'] ?? '') === 'updated' && isset($result['domain'])) {
+                $result['row_class'] = domain_row_class($result['domain']);
+                $result['status_html'] = domain_status_html($result['domain']);
+            }
+            echo json_encode(['ok' => true] + $result, JSON_UNESCAPED_UNICODE);
             exit;
         }
         if ($action === 'update_server') {
@@ -106,7 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
             $server = $repo->server((int)$_POST['id']);
             echo json_encode([
                 'ok' => true,
-                'message' => 'Server gespeichert.',
+                'message' => '[SERVER] ' . ($server['name'] ?? 'Unbekannt') . ': Aktualisiert.',
                 'server' => [
                     'id' => (int)$server['id'],
                     'name' => $server['name'],
@@ -133,17 +148,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['_action'] ?? '';
     try {
-        match ($action) {
-            'add_server' => $repo->addServer($_POST),
-            'update_server' => $repo->updateServer($_POST),
-            'add_package' => $repo->addPackage($_POST),
-            'queue_user' => $repo->queue('create_user', ($_POST['server_id'] ?? '') !== '' ? (int)$_POST['server_id'] : null, $_POST),
-            'update_domain' => $repo->updateDomainBilling($_POST),
-            'import_domains' => redirect_with($sync->importDomains()),
-            'run_sync' => redirect_with($sync->runQueue()),
+        $message = match ($action) {
+            'add_server' => (function () use ($repo): string {
+                $repo->addServer($_POST);
+                return '[SERVER] ' . ($_POST['name'] ?? 'Unbekannt') . ': Angelegt.';
+            })(),
+            'update_server' => (function () use ($repo): string {
+                $repo->updateServer($_POST);
+                return '[SERVER] ' . ($_POST['name'] ?? 'Unbekannt') . ': Aktualisiert.';
+            })(),
+            'add_package' => (function () use ($repo): string {
+                $repo->addPackage($_POST);
+                return '[HOSTINGPLAN] ' . ($_POST['name'] ?? 'Unbekannt') . ': Angelegt.';
+            })(),
+            'queue_user' => (function () use ($repo): string {
+                $repo->queue('create_user', ($_POST['server_id'] ?? '') !== '' ? (int)$_POST['server_id'] : null, $_POST);
+                return '[USER] ' . ($_POST['username'] ?? 'Unbekannt') . ': Vorgemerkt.';
+            })(),
+            'update_domain' => (function () use ($repo): string {
+                $repo->updateDomainBilling($_POST);
+                $domain = $repo->domain((int)$_POST['id']);
+                return '[Domain] ' . ($domain['domain'] ?? 'Unbekannt') . ': Gespeichert.';
+            })(),
+            'import_domains' => $sync->importDomains(),
+            'run_sync' => $sync->runQueue(),
             default => throw new RuntimeException('Unbekannte Aktion.'),
         };
-        redirect_with('Gespeichert.');
+        redirect_with($message);
     } catch (Throwable $e) {
         log_exception($config, $e, 'POST-Aktion fehlgeschlagen.', [
             'action' => $action ?? '',
@@ -155,27 +186,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $servers = $repo->servers();
 $domains = $repo->domains();
-$domainStatusHtml = static function (array $domain): string {
-    if (!empty($domain['delete_on'])) {
-        return '<span class="domain-state delete" title="Zur Loeschung vorgemerkt"><span class="status-icon">&#9003;</span><span>' . h($domain['delete_on']) . '</span></span>';
-    }
-    if (!empty($domain['is_disabled']) || ((string)($domain['domain_status'] ?? '') !== '' && (int)$domain['domain_status'] !== 1)) {
-        return '<span class="domain-state locked" title="Gesperrt oder deaktiviert"><span class="status-icon">&#128274;</span><span>gesperrt</span></span>';
-    }
-    return '';
-};
-$domainRowClass = static function (array $domain): string {
-    if (!empty($domain['delete_on'])) {
-        return 'domain-delete-pending';
-    }
-    if (!empty($domain['is_disabled']) || ((string)($domain['domain_status'] ?? '') !== '' && (int)$domain['domain_status'] !== 1)) {
-        return 'domain-disabled';
-    }
-    if ((int)($domain['duplicate_server_count'] ?? 0) > 1) {
-        return 'domain-duplicate';
-    }
-    return '';
-};
 $packages = $repo->packages();
 $actions = $repo->actions();
 $flash = $_SESSION['flash'] ?? null;
@@ -282,16 +292,16 @@ unset($_SESSION['flash']);
         <div class="section-head"><h2>Domains</h2><form method="post"><input type="hidden" name="_action" value="import_domains"><button>Domains einlesen</button></form></div>
         <div class="table-wrap"><table><thead><tr><th>Domain</th><th>Server</th><th>Benutzer</th><th>Registriert</th><th>Naechste Abrechnung</th><th>Anbieter</th><th>Loeschung</th><th>Subdomains</th><th></th></tr></thead><tbody>
                 <?php foreach ($domains as $domain): ?>
-            <tr class="domain-row <?= h($domainRowClass($domain)) ?>" data-domain-id="<?= (int)$domain['id'] ?>">
+            <tr class="domain-row <?= h(domain_row_class($domain)) ?>" data-domain-id="<?= (int)$domain['id'] ?>" data-domain-name="<?= h($domain['domain']) ?>">
                 <td><?= h($domain['domain']) ?></td>
                 <td><?= h($domain['server_name']) ?></td>
                 <td><?= h($domain['owner_name'] ?: ($domain['owner_external_id'] ? 'User #' . $domain['owner_external_id'] : '')) ?></td>
                 <td><?php if ($domain['registered_at']): ?><span class="readonly-value" data-field="registered_at"><?= h($domain['registered_at']) ?></span><?php else: ?><input type="date" name="registered_at" value=""><?php endif; ?></td>
                 <td><?php if ($domain['next_billing_at']): ?><span class="readonly-value" data-field="next_billing_at"><?= h($domain['next_billing_at']) ?></span><?php else: ?><input type="date" name="next_billing_at" value=""><?php endif; ?></td>
                 <td><input name="registrar" value="<?= h($domain['registrar']) ?>"></td>
-                <td><?= $domainStatusHtml($domain) ?></td>
+                <td class="domain-status-cell"><?= domain_status_html($domain) ?></td>
                 <td><button type="button" class="subdomain-toggle" data-server-id="<?= (int)$domain['server_id'] ?>" data-domain="<?= h($domain['domain']) ?>">anzeigen</button></td>
-                <td><button type="button" class="domain-save">Speichern</button></td>
+                <td><div class="domain-actions"><button type="button" class="icon-button domain-refresh" title="Domain vom Server aktualisieren" aria-label="Domain vom Server aktualisieren"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-clockwise" viewBox="0 0 16 16" aria-hidden="true"><path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/></svg></button><button type="button" class="domain-save">Speichern</button></div></td>
             </tr>
             <tr class="subdomain-row" id="subdomains-<?= (int)$domain['id'] ?>" hidden><td colspan="9"><div class="subdomain-box">Wird geladen...</div></td></tr>
         <?php endforeach; ?>
@@ -320,6 +330,21 @@ function updateDirtyField(field) {
 }
 
 function updateDateCell(row, fieldName, value) {
+    const existing = row.querySelector('[data-field="' + fieldName + '"]');
+    if (existing) {
+        if (value === '') {
+            const input = document.createElement('input');
+            input.type = 'date';
+            input.name = fieldName;
+            input.value = '';
+            existing.replaceWith(input);
+            initDomainDirtyTracking(row);
+            return;
+        }
+        existing.textContent = value;
+        return;
+    }
+
     const input = row.querySelector('[name="' + fieldName + '"]');
     if (!input || value === '') {
         if (input) {
@@ -333,11 +358,39 @@ function updateDateCell(row, fieldName, value) {
     span.textContent = value;
     input.replaceWith(span);
 }
+
+function clearDomainDirty(row) {
+    const prefix = row.dataset.domainId + ':';
+    for (const key of Array.from(dirtyDomainFields)) {
+        if (key.startsWith(prefix)) {
+            dirtyDomainFields.delete(key);
+        }
+    }
+}
+
 function markDomainRowSaved(row) {
     row.querySelectorAll('input[name="registered_at"], input[name="next_billing_at"], input[name="registrar"]').forEach((field) => {
         field.dataset.savedValue = field.value;
         updateDirtyField(field);
     });
+}
+
+function applyDomainData(row, domain, rowClass = '', statusHtml = '') {
+    row.querySelector('td:nth-child(3)').textContent = domain.owner_name || (domain.owner_external_id ? 'User #' + domain.owner_external_id : '');
+    updateDateCell(row, 'registered_at', domain.registered_at || '');
+    updateDateCell(row, 'next_billing_at', domain.next_billing_at || '');
+    row.querySelector('[name="registrar"]').value = domain.registrar || '';
+    row.querySelector('.domain-status-cell').innerHTML = statusHtml || '';
+    row.className = 'domain-row ' + (rowClass || '');
+    row.dataset.domainName = domain.domain || row.dataset.domainName;
+    markDomainRowSaved(row);
+}
+
+function updateDuplicateClasses(domainName) {
+    const rows = Array.from(document.querySelectorAll('.domain-row')).filter((row) => row.dataset.domainName === domainName);
+    if (rows.length <= 1) {
+        rows.forEach((row) => row.classList.remove('domain-duplicate'));
+    }
 }
 
 initDomainDirtyTracking();
@@ -418,10 +471,7 @@ document.addEventListener('click', async (event) => {
     button.disabled = true;
     try {
         const data = await postAjax(body);
-        updateDateCell(row, 'registered_at', data.domain.registered_at || '');
-        updateDateCell(row, 'next_billing_at', data.domain.next_billing_at || '');
-        row.querySelector('[name="registrar"]').value = data.domain.registrar || '';
-        markDomainRowSaved(row);
+        applyDomainData(row, data.domain, data.row_class, data.status_html);
         row.classList.add('row-saved');
         setTimeout(() => row.classList.remove('row-saved'), 900);
         showToast(data.message || 'Domain gespeichert.');
@@ -429,6 +479,42 @@ document.addEventListener('click', async (event) => {
         showToast(error.message, 'error');
     } finally {
         button.disabled = false;
+    }
+});
+
+document.addEventListener('click', async (event) => {
+    const button = event.target.closest('.domain-refresh');
+    if (!button) {
+        return;
+    }
+    const row = button.closest('.domain-row');
+    const domainId = row.dataset.domainId;
+    const domainName = row.dataset.domainName;
+    const body = new FormData();
+    body.set('_ajax', '1');
+    body.set('_action', 'refresh_domain');
+    body.set('id', domainId);
+    button.disabled = true;
+    button.classList.add('loading');
+    try {
+        const data = await postAjax(body);
+        if (data.status === 'deleted') {
+            clearDomainDirty(row);
+            document.getElementById('subdomains-' + domainId)?.remove();
+            row.remove();
+            updateDuplicateClasses(domainName);
+            showToast(data.message || 'Domain lokal geloescht.');
+            return;
+        }
+        applyDomainData(row, data.domain, data.row_class, data.status_html);
+        row.classList.add('row-saved');
+        setTimeout(() => row.classList.remove('row-saved'), 900);
+        showToast(data.message || 'Domain aktualisiert.');
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        button.disabled = false;
+        button.classList.remove('loading');
     }
 });
 

@@ -46,6 +46,53 @@ final class SyncService
         return $result;
     }
 
+    public function refreshDomain(int $domainId): array
+    {
+        $localDomain = $this->repo->domain($domainId);
+        if (!$localDomain) {
+            throw new RuntimeException('Domain nicht gefunden.');
+        }
+
+        $server = $this->repo->server((int)$localDomain['server_id']);
+        if (!$server) {
+            throw new RuntimeException('Server nicht gefunden.');
+        }
+
+        $client = new KeyHelpClient($this->config, $server);
+        $domains = $this->normalizeList($client->listDomains());
+        $mainDomains = $this->mainDomains($domains, $server);
+        $targetName = $this->domainName($localDomain);
+        $freshDomain = null;
+
+        foreach ($mainDomains as $domain) {
+            if ($this->domainName($domain) === $targetName) {
+                $freshDomain = $domain;
+                break;
+            }
+        }
+
+        if ($freshDomain === null) {
+            $this->repo->deleteDomain($domainId);
+            return [
+                'status' => 'deleted',
+                'message' => '[Domain] ' . ($targetName ?: 'Unbekannt') . ': Auf dem Server nicht mehr gefunden und lokal geloescht.',
+            ];
+        }
+
+        $usersById = $this->usersById($client);
+        $this->repo->saveDomain((int)$server['id'], $this->withOwnerDetails($client, $freshDomain, $usersById), $usersById);
+        $updatedDomain = $this->repo->domain($domainId);
+        if (!$updatedDomain) {
+            throw new RuntimeException('Domain konnte nach dem Aktualisieren nicht geladen werden.');
+        }
+
+        return [
+            'status' => 'updated',
+            'message' => '[Domain] ' . ($updatedDomain['domain'] ?? $targetName ?? 'Unbekannt') . ': Vom Server eingelesen.',
+            'domain' => $updatedDomain,
+        ];
+    }
+
     public function runQueue(): string
     {
         $runId = $this->repo->createSyncRun('running');
