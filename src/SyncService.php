@@ -5,6 +5,51 @@ final class SyncService
 
     public function __construct(private array $config, private Repository $repo) {}
 
+
+    public function dashboardServers(): array
+    {
+        return array_map(fn(array $server): array => $this->dashboardServerEntry($server), $this->repo->servers(true));
+    }
+
+    public function dashboardServer(int $serverId): array
+    {
+        $server = $this->repo->server($serverId);
+        if (!$server) {
+            throw new RuntimeException('Server nicht gefunden.');
+        }
+        return $this->dashboardServerEntry($server);
+    }
+
+    public function userOverview(): array
+    {
+        $result = [];
+        foreach ($this->repo->servers(true) as $server) {
+            try {
+                $client = new KeyHelpClient($this->config, $server);
+                $users = $this->normalizeList($client->listUsers());
+                foreach ($users as &$user) {
+                    if (is_array($user)) {
+                        $user['_server_id'] = (int)$server['id'];
+                        $user['_server_name'] = $server['name'];
+                    }
+                }
+                unset($user);
+                $result[] = [
+                    'server' => $server,
+                    'users' => array_values(array_filter($users, 'is_array')),
+                    'error' => '',
+                ];
+            } catch (Throwable $e) {
+                $this->logViewError($e, 'Benutzerliste konnte nicht geladen werden.', $server);
+                $result[] = [
+                    'server' => $server,
+                    'users' => [],
+                    'error' => 'Benutzerliste konnte nicht geladen werden. Details wurden ins Log geschrieben.',
+                ];
+            }
+        }
+        return $result;
+    }
     public function importDomains(): string
     {
         $count = 0;
@@ -19,9 +64,30 @@ final class SyncService
                 $count++;
             }
         }
-        return $count . ' Hauptdomains aktualisiert.';
+        return '[DOMAINS] Alle Server: ' . $count . ' Hauptdomains aktualisiert.';
     }
 
+
+    public function importHostingPlans(): string
+    {
+        $count = 0;
+        foreach ($this->repo->servers(true) as $server) {
+            $client = new KeyHelpClient($this->config, $server);
+            $plans = array_values(array_filter($this->normalizeList($client->listHostingPlans()), 'is_array'));
+            $externalIds = [];
+            foreach ($plans as $plan) {
+                $externalId = (string)($plan['id'] ?? $plan['external_id'] ?? '');
+                if ($externalId === '') {
+                    continue;
+                }
+                $externalIds[] = $externalId;
+                $this->repo->saveHostingPlan((int)$server['id'], $plan);
+                $count++;
+            }
+            $this->repo->deleteHostingPlansExcept((int)$server['id'], $externalIds);
+        }
+        return '[HOSTINGPLAN] Alle Server: ' . $count . ' Hostingplaene aktualisiert.';
+    }
     public function subdomainsFor(int $serverId, string $domainName): array
     {
         $server = $this->repo->server($serverId);
@@ -125,6 +191,35 @@ final class SyncService
         }
     }
 
+
+
+    private function dashboardServerEntry(array $server): array
+    {
+        try {
+            $client = new KeyHelpClient($this->config, $server);
+            return [
+                'server' => $server,
+                'info' => $this->normalizeItem($client->serverInfo()),
+                'error' => '',
+            ];
+        } catch (Throwable $e) {
+            $this->logViewError($e, 'Serverstatus konnte nicht geladen werden.', $server);
+            return [
+                'server' => $server,
+                'info' => [],
+                'error' => 'Serverstatus konnte nicht geladen werden. Details wurden ins Log geschrieben.',
+            ];
+        }
+    }
+    private function logViewError(Throwable $exception, string $message, array $server): void
+    {
+        if (function_exists('log_exception')) {
+            log_exception($this->config, $exception, $message, [
+                'server_id' => $server['id'] ?? null,
+                'server' => $server['name'] ?? '',
+            ]);
+        }
+    }
     private function mainDomains(array $domains, array $server): array
     {
         $domains = $this->withoutSystemDomains($domains, $server);
@@ -244,7 +339,7 @@ final class SyncService
         if (array_is_list($response)) {
             return $response;
         }
-        foreach (['data', 'items', 'domains', 'users'] as $key) {
+        foreach (['data', 'items', 'domains', 'users', 'hosting_plans', 'hostingPlans', 'plans'] as $key) {
             if (isset($response[$key]) && is_array($response[$key])) {
                 return $response[$key];
             }

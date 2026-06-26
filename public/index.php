@@ -5,6 +5,7 @@ $config = file_exists($configFile) ? require $configFile : require dirname(__DIR
 date_default_timezone_set($config['app']['timezone']);
 
 require dirname(__DIR__) . '/src/helpers.php';
+require dirname(__DIR__) . '/src/View.php';
 require dirname(__DIR__) . '/src/Logger.php';
 
 set_exception_handler(static function (Throwable $exception) use ($config): void {
@@ -16,7 +17,7 @@ set_exception_handler(static function (Throwable $exception) use ($config): void
         echo json_encode(['ok' => false, 'message' => 'Die Aktion konnte nicht ausgefuehrt werden. Details wurden ins Log geschrieben.'], JSON_UNESCAPED_UNICODE);
         return;
     }
-    echo '<!doctype html><meta charset="utf-8"><title>Fehler</title><p>Die Anwendung konnte die Anfrage nicht verarbeiten. Details wurden ins Log geschrieben.</p>';
+    render_template('error', ['message' => 'Die Anwendung konnte die Anfrage nicht verarbeiten. Details wurden ins Log geschrieben.']);
 });
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_action'] ?? '') === 'login') {
@@ -40,32 +41,12 @@ if (($_GET['logout'] ?? '') === '1') {
 if (empty($_SESSION['authenticated'])) {
     $flash = $_SESSION['flash'] ?? null;
     unset($_SESSION['flash']);
-    ?>
-    <!doctype html>
-    <html lang="de">
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title><?= h($config['app']['name']) ?></title>
-        <link rel="stylesheet" href="/assets/app.css">
-    </head>
-    <body class="login-screen">
-        <form method="post" class="login-card">
-            <input type="hidden" name="_action" value="login">
-            <span class="brand-mark">K</span>
-            <h1>KeyHelp Verwaltung</h1>
-            <?php if ($flash): ?><div class="flash <?= h($flash['type']) ?>"><?= h($flash['message']) ?></div><?php endif; ?>
-            <input name="user" placeholder="Benutzer" required autofocus>
-            <input name="password" type="password" placeholder="Passwort" required>
-            <button class="primary">Einloggen</button>
-        </form>
-    
-</body>
-    </html>
-    <?php
+    render_template('login', [
+        'config' => $config,
+        'flash' => $flash,
+    ]);
     exit;
 }
-
 require dirname(__DIR__) . '/src/Database.php';
 require dirname(__DIR__) . '/src/DomainOwner.php';
 require dirname(__DIR__) . '/src/KeyHelpClient.php';
@@ -95,6 +76,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
     header('Content-Type: application/json; charset=utf-8');
     try {
         $action = $_POST['_action'] ?? '';
+        if ($action === 'load_dashboard') {
+            $statuses = array_map(static fn(array $entry): array => server_status_view($entry), $sync->dashboardServers());
+            echo json_encode(['ok' => true, 'statuses' => $statuses], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        if ($action === 'load_users') {
+            $groups = array_map(static function (array $group): array {
+                return [
+                    'server' => [
+                        'id' => (int)($group['server']['id'] ?? 0),
+                        'name' => (string)($group['server']['name'] ?? ''),
+                    ],
+                    'error' => (string)($group['error'] ?? ''),
+                    'users' => array_map(static fn(array $user): array => [
+                        'id' => (string)($user['id'] ?? $user['id_user'] ?? ''),
+                        'name' => user_display_name($user),
+                        'email' => user_email($user),
+                    ], $group['users'] ?? []),
+                ];
+            }, $sync->userOverview());
+            echo json_encode(['ok' => true, 'groups' => $groups], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        if ($action === 'refresh_server_status') {
+            $entry = $sync->dashboardServer((int)$_POST['id']);
+            $status = server_status_view($entry);
+            echo json_encode([
+                'ok' => true,
+                'message' => '[SERVER] ' . ($status['hostname'] ?: $status['server_name']) . ': Status aktualisiert.',
+                'status' => $status,
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
         if ($action === 'update_domain') {
             $repo->updateDomainBilling($_POST);
             $domain = $repo->domain((int)$_POST['id']);
@@ -165,12 +179,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $repo->queue('create_user', ($_POST['server_id'] ?? '') !== '' ? (int)$_POST['server_id'] : null, $_POST);
                 return '[USER] ' . ($_POST['username'] ?? 'Unbekannt') . ': Vorgemerkt.';
             })(),
+            'update_config' => (function () use ($repo): string {
+                $seconds = $repo->updateServerRefreshInterval((int)($_POST['server_refresh_interval'] ?? 60));
+                return '[KONFIGURATION] Server-Refresh: ' . $seconds . ' Sekunden gespeichert.';
+            })(),
             'update_domain' => (function () use ($repo): string {
                 $repo->updateDomainBilling($_POST);
                 $domain = $repo->domain((int)$_POST['id']);
                 return '[Domain] ' . ($domain['domain'] ?? 'Unbekannt') . ': Gespeichert.';
             })(),
             'import_domains' => $sync->importDomains(),
+            'import_hosting_plans' => $sync->importHostingPlans(),
             'run_sync' => $sync->runQueue(),
             default => throw new RuntimeException('Unbekannte Aktion.'),
         };
@@ -188,399 +207,35 @@ $servers = $repo->servers();
 $domains = $repo->domains();
 $packages = $repo->packages();
 $actions = $repo->actions();
+$serverRefreshInterval = $repo->serverRefreshInterval();
+$serverRefreshIntervalOptions = Repository::refreshIntervalOptions();
+$allowedPages = ['dashboard', 'domains', 'users', 'hosting', 'server', 'config'];
+$page = (string)($_GET['page'] ?? 'dashboard');
+if (!in_array($page, $allowedPages, true)) {
+    $page = 'dashboard';
+}
+$returnPath = '/?page=' . rawurlencode($page);
 $flash = $_SESSION['flash'] ?? null;
 unset($_SESSION['flash']);
-?>
-<!doctype html>
-<html lang="de">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title><?= h($config['app']['name']) ?></title>
-    <link rel="stylesheet" href="/assets/app.css">
-</head>
-<body>
-<header class="topbar">
-    <div>
-        <span class="brand-mark">K</span>
-        <strong>KeyHelp Verwaltung</strong>
-    </div>
-    <div class="top-actions">
-        <form method="post"><input type="hidden" name="_action" value="run_sync"><button class="primary">Sync starten</button></form>
-        <a class="ghost" href="/?logout=1">Logout</a>
-    </div>
-</header>
-<main class="layout">
-    <?php if ($flash): ?><div class="flash <?= h($flash['type']) ?>"><?= h($flash['message']) ?></div><?php endif; ?>
-    <section class="metrics">
-        <div><strong><?= count($servers) ?></strong><span>Server</span></div>
-        <div><strong><?= count($domains) ?></strong><span>Domains</span></div>
-        <div><strong><?= count($packages) ?></strong><span>Pakete</span></div>
-        <div><strong><?= count($actions) ?></strong><span>offene Aktionen</span></div>
-    </section>
+$navItems = [
+    'dashboard' => 'Dashboard',
+    'domains' => 'Domains',
+    'users' => 'User',
+    'hosting' => 'Hostingpakete',
+    'server' => 'Server',
+    'config' => 'Konfiguration',
+];
 
-    <section class="grid two">
-        <div class="panel">
-            <h2>Server</h2>
-            <form method="post" class="stack">
-                <input type="hidden" name="_action" value="add_server">
-                <input name="name" placeholder="Name" required>
-                <input name="base_url" placeholder="https://server.example.tld" required>
-                <input name="api_token" type="password" autocomplete="new-password" placeholder="API Token" required>
-                <button>Server speichern</button>
-            </form>
-            <div class="server-list">
-                <?php foreach ($servers as $server): ?>
-                    <div class="server-item" data-server-id="<?= (int)$server['id'] ?>">
-                        <div class="server-summary">
-                            <div><b class="server-name"><?= h($server['name']) ?></b><span class="server-url"><?= h($server['base_url']) ?></span></div>
-                            <code class="server-key-preview"><?= h(substr((string)$server['api_token'], 0, 10)) ?>...</code>
-                            <span class="status <?= (int)$server['active'] === 1 ? 'on' : 'off' ?>"><?= (int)$server['active'] === 1 ? 'aktiv' : 'inaktiv' ?></span>
-                            <button type="button" class="server-edit-toggle">Bearbeiten</button>
-                        </div>
-                        <form method="post" class="server-editor ajax-server-form" hidden>
-                            <input type="hidden" name="_action" value="update_server">
-                            <input type="hidden" name="id" value="<?= (int)$server['id'] ?>">
-                            <input name="name" value="<?= h($server['name']) ?>" required>
-                            <input name="base_url" value="<?= h($server['base_url']) ?>" required>
-                            <input name="api_token" type="password" autocomplete="new-password" placeholder="Neuer API-Key, leer lassen fuer unveraendert">
-                            <label class="check"><input type="checkbox" name="active" value="1" <?= (int)$server['active'] === 1 ? 'checked' : '' ?>> aktiv</label>
-                            <button>Aktualisieren</button>
-                        </form>
-                    </div>
-                <?php endforeach; ?>
-            </div>
-        </div>
-
-        <div class="panel">
-            <h2>Benutzer vormerken</h2>
-            <form method="post" class="stack">
-                <input type="hidden" name="_action" value="queue_user">
-                <input name="username" placeholder="Benutzername" required>
-                <input name="email" type="email" placeholder="E-Mail" required>
-                <input name="password" type="password" placeholder="Initiales Passwort" required>
-                <select name="server_id"><option value="">systemweit</option><?php foreach ($servers as $server): ?><option value="<?= (int)$server['id'] ?>"><?= h($server['name']) ?></option><?php endforeach; ?></select>
-                <button>Aktion vormerken</button>
-            </form>
-        </div>
-    </section>
-
-    <section class="grid two">
-        <div class="panel">
-            <h2>Hostingpakete</h2>
-            <form method="post" class="stack">
-                <input type="hidden" name="_action" value="add_package">
-                <input name="name" placeholder="Paketname" required>
-                <textarea name="description" placeholder="Beschreibung"></textarea>
-                <textarea name="limits_json" placeholder='{"diskSpace": 10240, "mailboxes": 10}'>{}</textarea>
-                <select name="scope"><option value="system">systemweit</option><option value="server">serverspezifisch</option></select>
-                <select name="server_id"><option value="">alle Server</option><?php foreach ($servers as $server): ?><option value="<?= (int)$server['id'] ?>"><?= h($server['name']) ?></option><?php endforeach; ?></select>
-                <button>Paket anlegen und vormerken</button>
-            </form>
-        </div>
-
-        <div class="panel">
-            <h2>Sync-Warteschlange</h2>
-            <div class="queue">
-                <?php foreach ($actions as $item): ?><div><b><?= h($item['type']) ?></b><span><?= h($item['server_name'] ?: 'systemweit') ?></span><code><?= h($item['payload_json']) ?></code></div><?php endforeach; ?>
-                <?php if (!$actions): ?><p class="empty">Keine offenen Aktionen.</p><?php endif; ?>
-            </div>
-        </div>
-    </section>
-
-    <section class="panel wide">
-        <div class="section-head"><h2>Domains</h2><form method="post"><input type="hidden" name="_action" value="import_domains"><button>Domains einlesen</button></form></div>
-        <div class="table-wrap"><table><thead><tr><th>Domain</th><th>Server</th><th>Benutzer</th><th>Registriert</th><th>Naechste Abrechnung</th><th>Anbieter</th><th>Loeschung</th><th>Subdomains</th><th></th></tr></thead><tbody>
-                <?php foreach ($domains as $domain): ?>
-            <tr class="domain-row <?= h(domain_row_class($domain)) ?>" data-domain-id="<?= (int)$domain['id'] ?>" data-domain-name="<?= h($domain['domain']) ?>">
-                <td><?= h($domain['domain']) ?></td>
-                <td><?= h($domain['server_name']) ?></td>
-                <td><?= h($domain['owner_name'] ?: ($domain['owner_external_id'] ? 'User #' . $domain['owner_external_id'] : '')) ?></td>
-                <td><?php if ($domain['registered_at']): ?><span class="readonly-value" data-field="registered_at"><?= h($domain['registered_at']) ?></span><?php else: ?><input type="date" name="registered_at" value=""><?php endif; ?></td>
-                <td><?php if ($domain['next_billing_at']): ?><span class="readonly-value" data-field="next_billing_at"><?= h($domain['next_billing_at']) ?></span><?php else: ?><input type="date" name="next_billing_at" value=""><?php endif; ?></td>
-                <td><input name="registrar" value="<?= h($domain['registrar']) ?>"></td>
-                <td class="domain-status-cell"><?= domain_status_html($domain) ?></td>
-                <td><button type="button" class="subdomain-toggle" data-server-id="<?= (int)$domain['server_id'] ?>" data-domain="<?= h($domain['domain']) ?>">anzeigen</button></td>
-                <td><div class="domain-actions"><button type="button" class="icon-button domain-refresh" title="Domain vom Server aktualisieren" aria-label="Domain vom Server aktualisieren"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-clockwise" viewBox="0 0 16 16" aria-hidden="true"><path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/></svg></button><button type="button" class="domain-save">Speichern</button></div></td>
-            </tr>
-            <tr class="subdomain-row" id="subdomains-<?= (int)$domain['id'] ?>" hidden><td colspan="9"><div class="subdomain-box">Wird geladen...</div></td></tr>
-        <?php endforeach; ?>
-        </tbody></table></div>
-    </section>
-</main>
-<script>
-const dirtyDomainFields = new Set();
-
-function initDomainDirtyTracking(scope = document) {
-    scope.querySelectorAll('.domain-row input[name="registered_at"], .domain-row input[name="next_billing_at"], .domain-row input[name="registrar"]').forEach((field) => {
-        field.dataset.savedValue = field.value;
-        updateDirtyField(field);
-    });
-}
-
-function updateDirtyField(field) {
-    const key = field.closest('.domain-row').dataset.domainId + ':' + field.name;
-    const isDirty = field.value !== (field.dataset.savedValue ?? '');
-    field.classList.toggle('field-dirty', isDirty);
-    if (isDirty) {
-        dirtyDomainFields.add(key);
-    } else {
-        dirtyDomainFields.delete(key);
-    }
-}
-
-function updateDateCell(row, fieldName, value) {
-    const existing = row.querySelector('[data-field="' + fieldName + '"]');
-    if (existing) {
-        if (value === '') {
-            const input = document.createElement('input');
-            input.type = 'date';
-            input.name = fieldName;
-            input.value = '';
-            existing.replaceWith(input);
-            initDomainDirtyTracking(row);
-            return;
-        }
-        existing.textContent = value;
-        return;
-    }
-
-    const input = row.querySelector('[name="' + fieldName + '"]');
-    if (!input || value === '') {
-        if (input) {
-            input.value = value;
-        }
-        return;
-    }
-    const span = document.createElement('span');
-    span.className = 'readonly-value';
-    span.dataset.field = fieldName;
-    span.textContent = value;
-    input.replaceWith(span);
-}
-
-function clearDomainDirty(row) {
-    const prefix = row.dataset.domainId + ':';
-    for (const key of Array.from(dirtyDomainFields)) {
-        if (key.startsWith(prefix)) {
-            dirtyDomainFields.delete(key);
-        }
-    }
-}
-
-function markDomainRowSaved(row) {
-    row.querySelectorAll('input[name="registered_at"], input[name="next_billing_at"], input[name="registrar"]').forEach((field) => {
-        field.dataset.savedValue = field.value;
-        updateDirtyField(field);
-    });
-}
-
-function applyDomainData(row, domain, rowClass = '', statusHtml = '') {
-    row.querySelector('td:nth-child(3)').textContent = domain.owner_name || (domain.owner_external_id ? 'User #' + domain.owner_external_id : '');
-    updateDateCell(row, 'registered_at', domain.registered_at || '');
-    updateDateCell(row, 'next_billing_at', domain.next_billing_at || '');
-    row.querySelector('[name="registrar"]').value = domain.registrar || '';
-    row.querySelector('.domain-status-cell').innerHTML = statusHtml || '';
-    row.className = 'domain-row ' + (rowClass || '');
-    row.dataset.domainName = domain.domain || row.dataset.domainName;
-    markDomainRowSaved(row);
-}
-
-function updateDuplicateClasses(domainName) {
-    const rows = Array.from(document.querySelectorAll('.domain-row')).filter((row) => row.dataset.domainName === domainName);
-    if (rows.length <= 1) {
-        rows.forEach((row) => row.classList.remove('domain-duplicate'));
-    }
-}
-
-initDomainDirtyTracking();
-
-document.addEventListener('input', (event) => {
-    if (event.target.matches('.domain-row input[name="registered_at"], .domain-row input[name="next_billing_at"], .domain-row input[name="registrar"]')) {
-        updateDirtyField(event.target);
-    }
-});
-
-document.addEventListener('change', (event) => {
-    if (event.target.matches('.domain-row input[name="registered_at"], .domain-row input[name="next_billing_at"], .domain-row input[name="registrar"]')) {
-        updateDirtyField(event.target);
-    }
-});
-
-window.addEventListener('beforeunload', (event) => {
-    if (dirtyDomainFields.size === 0) {
-        return;
-    }
-    event.preventDefault();
-    event.returnValue = 'Es gibt ungespeicherte Domain-Aenderungen.';
-});
-
-document.addEventListener('click', (event) => {
-    const button = event.target.closest('.server-edit-toggle');
-    if (!button) {
-        return;
-    }
-    const item = button.closest('.server-item');
-    item.querySelector('.server-summary').hidden = true;
-    item.querySelector('.server-editor').hidden = false;
-});
-
-document.addEventListener('submit', async (event) => {
-    const form = event.target.closest('.ajax-server-form');
-    if (!form) {
-        return;
-    }
-    event.preventDefault();
-    const button = form.querySelector('button');
-    button.disabled = true;
-    try {
-        const data = await postAjax(new FormData(form));
-        const server = data.server;
-        const item = form.closest('.server-item');
-        const summary = item.querySelector('.server-summary');
-        summary.querySelector('.server-name').textContent = server.name;
-        summary.querySelector('.server-url').textContent = server.base_url;
-        summary.querySelector('.server-key-preview').textContent = server.api_key_preview;
-        const status = summary.querySelector('.status');
-        status.textContent = server.active ? 'aktiv' : 'inaktiv';
-        status.className = 'status ' + (server.active ? 'on' : 'off');
-        form.querySelector('[name="api_token"]').value = '';
-        form.hidden = true;
-        summary.hidden = false;
-        showToast(data.message || 'Server gespeichert.');
-    } catch (error) {
-        showToast(error.message, 'error');
-    } finally {
-        button.disabled = false;
-    }
-});
-
-document.addEventListener('click', async (event) => {
-    const button = event.target.closest('.domain-save');
-    if (!button) {
-        return;
-    }
-    const row = button.closest('.domain-row');
-    const body = new FormData();
-    body.set('_ajax', '1');
-    body.set('_action', 'update_domain');
-    body.set('id', row.dataset.domainId);
-    body.set('registered_at', row.querySelector('[name="registered_at"]')?.value || row.querySelector('[data-field="registered_at"]')?.textContent.trim() || '');
-    body.set('next_billing_at', row.querySelector('[name="next_billing_at"]')?.value || row.querySelector('[data-field="next_billing_at"]')?.textContent.trim() || '');
-    body.set('registrar', row.querySelector('[name="registrar"]').value);
-    button.disabled = true;
-    try {
-        const data = await postAjax(body);
-        applyDomainData(row, data.domain, data.row_class, data.status_html);
-        row.classList.add('row-saved');
-        setTimeout(() => row.classList.remove('row-saved'), 900);
-        showToast(data.message || 'Domain gespeichert.');
-    } catch (error) {
-        showToast(error.message, 'error');
-    } finally {
-        button.disabled = false;
-    }
-});
-
-document.addEventListener('click', async (event) => {
-    const button = event.target.closest('.domain-refresh');
-    if (!button) {
-        return;
-    }
-    const row = button.closest('.domain-row');
-    const domainId = row.dataset.domainId;
-    const domainName = row.dataset.domainName;
-    const body = new FormData();
-    body.set('_ajax', '1');
-    body.set('_action', 'refresh_domain');
-    body.set('id', domainId);
-    button.disabled = true;
-    button.classList.add('loading');
-    try {
-        const data = await postAjax(body);
-        if (data.status === 'deleted') {
-            clearDomainDirty(row);
-            document.getElementById('subdomains-' + domainId)?.remove();
-            row.remove();
-            updateDuplicateClasses(domainName);
-            showToast(data.message || 'Domain lokal geloescht.');
-            return;
-        }
-        applyDomainData(row, data.domain, data.row_class, data.status_html);
-        row.classList.add('row-saved');
-        setTimeout(() => row.classList.remove('row-saved'), 900);
-        showToast(data.message || 'Domain aktualisiert.');
-    } catch (error) {
-        showToast(error.message, 'error');
-    } finally {
-        button.disabled = false;
-        button.classList.remove('loading');
-    }
-});
-
-document.addEventListener('click', async (event) => {
-    const button = event.target.closest('.subdomain-toggle');
-    if (!button) {
-        return;
-    }
-    const row = button.closest('.domain-row');
-    const target = document.getElementById('subdomains-' + row.dataset.domainId);
-    const box = target.querySelector('.subdomain-box');
-    target.hidden = !target.hidden;
-    if (target.hidden || button.dataset.loaded === '1') {
-        return;
-    }
-    button.disabled = true;
-    box.textContent = 'Wird geladen...';
-    try {
-        const params = new URLSearchParams({ ajax: 'subdomains', server_id: button.dataset.serverId, domain: button.dataset.domain });
-        const response = await fetch('?' + params.toString(), { headers: { Accept: 'application/json' } });
-        const data = await response.json();
-        if (!response.ok || !data.ok) {
-            throw new Error(data.message || 'Subdomains konnten nicht geladen werden.');
-        }
-        button.dataset.loaded = '1';
-        box.innerHTML = data.subdomains.length
-            ? '<ul>' + data.subdomains.map((item) => '<li><b>' + escapeHtml(item.domain) + '</b><span>' + escapeHtml(item.owner || '') + '</span></li>').join('') + '</ul>'
-            : '<p>Keine Subdomains gefunden.</p>';
-    } catch (error) {
-        box.innerHTML = '<p class="error-text">' + escapeHtml(error.message) + '</p>';
-    } finally {
-        button.disabled = false;
-    }
-});
-
-async function postAjax(body) {
-    body.set('_ajax', '1');
-    const response = await fetch('', { method: 'POST', body, headers: { Accept: 'application/json' } });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-        throw new Error(data.message || 'Speichern fehlgeschlagen.');
-    }
-    return data;
-}
-
-function showToast(message, type = 'ok') {
-    let stack = document.querySelector('.toast-stack');
-    if (!stack) {
-        stack = document.createElement('div');
-        stack.className = 'toast-stack';
-        document.body.appendChild(stack);
-    }
-    const toast = document.createElement('div');
-    toast.className = 'toast ' + type;
-    toast.textContent = message;
-    stack.appendChild(toast);
-    setTimeout(() => toast.classList.add('visible'), 20);
-    setTimeout(() => {
-        toast.classList.remove('visible');
-        setTimeout(() => toast.remove(), 180);
-    }, 2800);
-}
-
-function escapeHtml(value) {
-    return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[char]));
-}
-</script>
-</body>
-</html>
+render_template('app', [
+    'config' => $config,
+    'servers' => $servers,
+    'domains' => $domains,
+    'packages' => $packages,
+    'actions' => $actions,
+    'serverRefreshInterval' => $serverRefreshInterval,
+    'serverRefreshIntervalOptions' => $serverRefreshIntervalOptions,
+    'page' => $page,
+    'returnPath' => $returnPath,
+    'flash' => $flash,
+    'navItems' => $navItems,
+]);

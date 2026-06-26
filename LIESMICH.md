@@ -1,4 +1,4 @@
-# KeyHelp Verwaltung
+# KeyHelp MSM
 
 Zentrale PHP-Webanwendung für mehrere KeyHelp-Server.
 

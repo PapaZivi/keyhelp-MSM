@@ -3,6 +3,47 @@ final class Repository
 {
     public function __construct(private PDO $pdo) {}
 
+
+    public function serverRefreshInterval(): int
+    {
+        $value = (int)$this->setting('server_refresh_interval', '60');
+        return in_array($value, self::refreshIntervalOptions(), true) ? $value : 60;
+    }
+
+    public function updateServerRefreshInterval(int $seconds): int
+    {
+        if (!in_array($seconds, self::refreshIntervalOptions(), true)) {
+            throw new RuntimeException('Ungueltiges Refresh-Intervall.');
+        }
+        $this->saveSetting('server_refresh_interval', (string)$seconds);
+        return $seconds;
+    }
+
+    public static function refreshIntervalOptions(): array
+    {
+        return [5, 15, 30, 60, 90, 120, 180, 300];
+    }
+
+    private function setting(string $key, string $default = ''): string
+    {
+        $this->ensureSettingsTable();
+        $stmt = $this->pdo->prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?');
+        $stmt->execute([$key]);
+        $value = $stmt->fetchColumn();
+        return $value === false ? $default : (string)$value;
+    }
+
+    private function saveSetting(string $key, string $value): void
+    {
+        $this->ensureSettingsTable();
+        $stmt = $this->pdo->prepare('INSERT INTO app_settings(setting_key, setting_value) VALUES(?, ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = CURRENT_TIMESTAMP');
+        $stmt->execute([$key, $value]);
+    }
+
+    private function ensureSettingsTable(): void
+    {
+        $this->pdo->exec('CREATE TABLE IF NOT EXISTS app_settings (setting_key VARCHAR(80) PRIMARY KEY, setting_value TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+    }
     public function servers(bool $activeOnly = false): array
     {
         $sql = 'SELECT * FROM servers' . ($activeOnly ? ' WHERE active = 1' : '') . ' ORDER BY name';
@@ -84,6 +125,48 @@ final class Repository
         $this->queue('create_hosting_package', $data['server_id'] ?: null, $data);
     }
 
+
+    public function saveHostingPlan(int $serverId, array $plan): void
+    {
+        $externalId = (string)($plan['id'] ?? $plan['external_id'] ?? '');
+        $name = $this->hostingPlanName($plan);
+        if ($externalId === '' || $name === '') {
+            return;
+        }
+        $description = (string)($plan['description'] ?? '');
+        $stmt = $this->pdo->prepare('INSERT INTO hosting_packages(external_id, name, description, limits_json, scope, server_id, synced_at) VALUES(?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), limits_json = VALUES(limits_json), scope = VALUES(scope), synced_at = CURRENT_TIMESTAMP');
+        $stmt->execute([
+            $externalId,
+            $name,
+            $description,
+            json_encode($plan, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'server',
+            $serverId,
+        ]);
+    }
+
+    public function deleteHostingPlansExcept(int $serverId, array $externalIds): void
+    {
+        $externalIds = array_values(array_filter(array_map('strval', $externalIds)));
+        if ($externalIds === []) {
+            $stmt = $this->pdo->prepare('DELETE FROM hosting_packages WHERE server_id = ? AND external_id IS NOT NULL');
+            $stmt->execute([$serverId]);
+            return;
+        }
+        $placeholders = implode(',', array_fill(0, count($externalIds), '?'));
+        $stmt = $this->pdo->prepare('DELETE FROM hosting_packages WHERE server_id = ? AND external_id IS NOT NULL AND external_id NOT IN (' . $placeholders . ')');
+        $stmt->execute(array_merge([$serverId], $externalIds));
+    }
+
+    private function hostingPlanName(array $plan): string
+    {
+        foreach (['name', 'title', 'description'] as $key) {
+            if (isset($plan[$key]) && trim((string)$plan[$key]) !== '') {
+                return trim((string)$plan[$key]);
+            }
+        }
+        return '';
+    }
     public function queue(string $type, ?int $serverId, array $payload): void
     {
         $stmt = $this->pdo->prepare('INSERT INTO planned_actions(type, server_id, payload_json) VALUES(?, ?, ?)');

@@ -25,12 +25,15 @@ CREATE TABLE IF NOT EXISTS domains (
 
 CREATE TABLE IF NOT EXISTS hosting_packages (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(190) NOT NULL UNIQUE,
+    external_id VARCHAR(190) NULL,
+    name VARCHAR(190) NOT NULL,
     description TEXT NULL,
     limits_json JSON NOT NULL,
     scope ENUM('system', 'server') NOT NULL DEFAULT 'system',
     server_id INT UNSIGNED NULL,
+    synced_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_server_hosting_package (server_id, external_id),
     CONSTRAINT fk_packages_server FOREIGN KEY(server_id) REFERENCES servers(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -52,4 +55,9 @@ CREATE TABLE IF NOT EXISTS sync_runs (
     message TEXT NULL,
     started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     finished_at DATETIME NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS app_settings (
+    setting_key VARCHAR(80) PRIMARY KEY,
+    setting_value TEXT NOT NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
