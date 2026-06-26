@@ -110,7 +110,7 @@ function serverCardHtml(status) {
     const hiddenError = status.error ? '' : ' hidden';
     const hiddenFacts = status.error ? ' hidden' : '';
     const hiddenReboot = status.reboot_required && !status.error ? '' : ' hidden';
-    return '<article class="server-card ' + (status.reboot_required ? 'needs-reboot' : '') + '" data-server-id="' + escapeHtml(status.server_id) + '">'
+    return '<article class="card server-card ' + (status.reboot_required ? 'needs-reboot' : '') + '" data-server-id="' + escapeHtml(status.server_id) + '">'
         + '<header><h2>' + serverHostnameHtml(status) + '</h2>'
         + '<button type="button" class="server-status-refresh" title="' + escapeHtml(tr('js.refresh_server', 'Refresh server information')) + '" aria-label="' + escapeHtml(tr('js.refresh_server', 'Refresh server information')) + '">' + refreshIconSvg + '<span class="refresh-countdown" data-refresh-countdown></span></button></header>'
         + '<p class="error-text server-status-error"' + hiddenError + '>' + escapeHtml(status.error || '') + '</p>'
@@ -170,12 +170,12 @@ async function loadUsers() {
 function userGroupHtml(group) {
     const title = '<h3>' + escapeHtml(group.server.name || tr('domains.server', 'Server')) + '</h3>';
     if (group.error) {
-        return '<section class="server-user-group">' + title + '<p class="error-text">' + escapeHtml(group.error) + '</p></section>';
+        return '<section class="card server-user-group"><div class="card-body">' + title + '<p class="error-text">' + escapeHtml(group.error) + '</p></div></section>';
     }
     const rows = group.users.length
         ? group.users.map((user) => '<tr><td>' + escapeHtml(user.name) + '</td><td>' + escapeHtml(user.email || '') + '</td><td>' + escapeHtml(user.id || '') + '</td></tr>').join('')
         : '<tr><td colspan="3" class="empty">' + escapeHtml(tr('js.no_users_found', 'No users found.')) + '</td></tr>';
-    return '<section class="server-user-group">' + title + '<div class="table-wrap"><table class="compact-table"><thead><tr><th>' + escapeHtml(tr('js.user', 'User')) + '</th><th>' + escapeHtml(tr('js.email', 'Email')) + '</th><th>' + escapeHtml(tr('js.id', 'ID')) + '</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
+    return '<section class="card server-user-group"><div class="card-body">' + title + '<div class="table-responsive"><table class="table table-hover align-middle compact-table"><thead><tr><th>' + escapeHtml(tr('js.user', 'User')) + '</th><th>' + escapeHtml(tr('js.email', 'Email')) + '</th><th>' + escapeHtml(tr('js.id', 'ID')) + '</th></tr></thead><tbody>' + rows + '</tbody></table></div></div></section>';
 }
 
 if (document.body.dataset.page === 'dashboard') {
