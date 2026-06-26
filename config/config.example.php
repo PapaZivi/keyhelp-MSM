@@ -3,6 +3,7 @@ return [
     'app' => [
         'name' => 'KeyHelp MSM',
         'timezone' => 'Europe/Berlin',
+        'locale' => 'de',
         'admin_user' => 'admin',
         'admin_password_hash' => password_hash('bitte-aendern', PASSWORD_DEFAULT),
         'debug_log_file' => __DIR__ . '/../storage/logs/debug.log',

@@ -1,6 +1,6 @@
 # KeyHelp MSM
 
-Zentrale PHP-Webanwendung für mehrere KeyHelp-Server.
+Zentrale PHP-Webanwendung zur Verwaltung mehrerer KeyHelp-Server.
 
 ## Umfang im ersten Stand
 
@@ -8,8 +8,8 @@ Zentrale PHP-Webanwendung für mehrere KeyHelp-Server.
 - Domains serverübergreifend synchronisieren und lokalen Abrechnungsdaten zuordnen
 - Hostingpakete zentral anlegen und als Aktionen vormerken
 - Benutzer systemweit oder serverspezifisch vormerken
-- Aktionen werden erst gesammelt und per Sync nach Sichtprüfung ausgeführt
-- Sync stoppt beim ersten Serverfehler und protokolliert die Ursache
+- Aktionen erst sammeln und per Sync nach manueller Prüfung ausführen
+- Synchronisation beim ersten Serverfehler stoppen und die Ursache protokollieren
 - lokale Datenhaltung in MySQL
 
 ## Deployment als Webanwendung
@@ -30,7 +30,7 @@ Beispiel Apache-VHost:
 </VirtualHost>
 ```
 
-Beispiel Nginx:
+Beispiel Nginx-Konfiguration:
 
 ```nginx
 server {
@@ -55,8 +55,25 @@ server {
 
 1. MySQL-Datenbank und Benutzer anlegen, z. B. `keyhelp_verwaltung`.
 2. `config/config.example.php` nach `config/config.php` kopieren.
-3. DB-Zugang, Admin-Passwort und KeyHelp-Server eintragen. Die KeyHelp-API nutzt standardmäßig den Header `X-API-Key`; bei abweichender Installation kann `keyhelp.auth` in der Config angepasst werden.
+3. DB-Zugangsdaten, Admin-Passwort und KeyHelp-Server eintragen. Die KeyHelp-API nutzt standardmäßig den Header `X-API-Key`; bei abweichender Installation kann `keyhelp.auth` in der Konfiguration angepasst werden.
 4. PHP mit PDO-MySQL und cURL verwenden.
-5. Webserver so konfigurieren, dass nur `public/` öffentlich erreichbar ist.
+5. Den Webserver so konfigurieren, dass nur `public/` öffentlich erreichbar ist.
 
-Die Anwendung legt die Tabellen beim ersten Aufruf automatisch an.
+Die Anwendung legt die erforderlichen Tabellen beim ersten Aufruf automatisch an.
+
+## Übersetzungen
+
+Die Weboberfläche unterstützt mehrere Sprachen über JSON-Dateien in `lang/`. Der Dateiname ist der Locale-Code, zum Beispiel `de.json` oder `en.json`.
+
+Um eine Sprache zu ergänzen, lege eine neue Datei wie `fr.json` mit dieser Struktur an:
+
+```json
+{
+  "language": "Français",
+  "messages": {
+    "common.save": "Enregistrer"
+  }
+}
+```
+
+Die Anwendung erkennt alle `lang/*.json`-Dateien automatisch. Die Standardsprache kann auf der Konfigurationsseite oder über `app.locale` in `config/config.php` gesetzt werden.

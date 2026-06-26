@@ -5,8 +5,12 @@ $config = file_exists($configFile) ? require $configFile : require dirname(__DIR
 date_default_timezone_set($config['app']['timezone']);
 
 require dirname(__DIR__) . '/src/helpers.php';
+require dirname(__DIR__) . '/src/I18n.php';
 require dirname(__DIR__) . '/src/View.php';
 require dirname(__DIR__) . '/src/Logger.php';
+
+
+i18n_init($config);
 
 set_exception_handler(static function (Throwable $exception) use ($config): void {
     log_exception($config, $exception, 'Unerwarteter Anwendungsfehler.', ['handler' => 'global']);
@@ -14,10 +18,10 @@ set_exception_handler(static function (Throwable $exception) use ($config): void
     $accept = $_SERVER['HTTP_ACCEPT'] ?? '';
     if (str_contains($accept, 'application/json') || (($_POST['_ajax'] ?? '') === '1') || isset($_GET['ajax'])) {
         header('Content-Type: application/json; charset=utf-8');
-        echo json_encode(['ok' => false, 'message' => 'Die Aktion konnte nicht ausgefuehrt werden. Details wurden ins Log geschrieben.'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['ok' => false, 'message' => t('message.generic_action_failed')], JSON_UNESCAPED_UNICODE);
         return;
     }
-    render_template('error', ['message' => 'Die Anwendung konnte die Anfrage nicht verarbeiten. Details wurden ins Log geschrieben.']);
+    render_template('error', ['message' => t('message.app_failed')]);
 });
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_action'] ?? '') === 'login') {
@@ -26,9 +30,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_action'] ?? '') === 'logi
     if ($userMatches && $passwordMatches) {
         session_regenerate_id(true);
         $_SESSION['authenticated'] = true;
-        redirect_with('Willkommen.');
+        redirect_with(t('message.welcome'));
     }
-    $_SESSION['flash'] = ['message' => 'Login fehlgeschlagen.', 'type' => 'error'];
+    $_SESSION['flash'] = ['message' => t('message.login_failed'), 'type' => 'error'];
 }
 
 if (($_GET['logout'] ?? '') === '1') {
@@ -44,6 +48,7 @@ if (empty($_SESSION['authenticated'])) {
     render_template('login', [
         'config' => $config,
         'flash' => $flash,
+        'supportedLocales' => i18n_supported_locales(),
     ]);
     exit;
 }
@@ -54,6 +59,10 @@ require dirname(__DIR__) . '/src/Repository.php';
 require dirname(__DIR__) . '/src/SyncService.php';
 
 $repo = new Repository(Database::connect($config));
+$configuredLocale = $repo->locale((string)($config['app']['locale'] ?? 'de'));
+if (!isset($_GET['lang']) && !isset($_SESSION['locale'])) {
+    i18n_set_locale($configuredLocale, false);
+}
 $sync = new SyncService($config, $repo);
 if (($_GET['ajax'] ?? '') === 'subdomains') {
     header('Content-Type: application/json; charset=utf-8');
@@ -67,7 +76,7 @@ if (($_GET['ajax'] ?? '') === 'subdomains') {
             'domain' => $_GET['domain'] ?? null,
         ]);
         http_response_code(500);
-        echo json_encode(['ok' => false, 'message' => 'Die Subdomains konnten nicht geladen werden. Details wurden ins Log geschrieben.'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['ok' => false, 'message' => t('message.subdomains_failed')], JSON_UNESCAPED_UNICODE);
     }
     exit;
 }
@@ -104,7 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
             $status = server_status_view($entry);
             echo json_encode([
                 'ok' => true,
-                'message' => '[SERVER] ' . ($status['hostname'] ?: $status['server_name']) . ': Status aktualisiert.',
+                'message' => t('message.server_status_updated', ['name' => ($status['hostname'] ?: $status['server_name'])]),
                 'status' => $status,
             ], JSON_UNESCAPED_UNICODE);
             exit;
@@ -114,7 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
             $domain = $repo->domain((int)$_POST['id']);
             echo json_encode([
                 'ok' => true,
-                'message' => '[Domain] ' . ($domain['domain'] ?? 'Unbekannt') . ': Gespeichert.',
+                'message' => t('message.domain_saved', ['name' => ($domain['domain'] ?? t('common.unknown'))]),
                 'domain' => $domain,
                 'row_class' => domain_row_class($domain),
                 'status_html' => domain_status_html($domain),
@@ -135,7 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
             $server = $repo->server((int)$_POST['id']);
             echo json_encode([
                 'ok' => true,
-                'message' => '[SERVER] ' . ($server['name'] ?? 'Unbekannt') . ': Aktualisiert.',
+                'message' => t('message.server_updated', ['name' => ($server['name'] ?? t('common.unknown'))]),
                 'server' => [
                     'id' => (int)$server['id'],
                     'name' => $server['name'],
@@ -146,7 +155,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
             ], JSON_UNESCAPED_UNICODE);
             exit;
         }
-        throw new RuntimeException('Unbekannte AJAX-Aktion.');
+        throw new RuntimeException('Unknown AJAX action.');
     } catch (Throwable $e) {
         $failedAction = $action ?? 'ajax';
         log_exception($config, $e, 'AJAX-Aktion fehlgeschlagen.', [
@@ -165,33 +174,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $message = match ($action) {
             'add_server' => (function () use ($repo): string {
                 $repo->addServer($_POST);
-                return '[SERVER] ' . ($_POST['name'] ?? 'Unbekannt') . ': Angelegt.';
+                return t('message.server_created', ['name' => ($_POST['name'] ?? t('common.unknown'))]);
             })(),
             'update_server' => (function () use ($repo): string {
                 $repo->updateServer($_POST);
-                return '[SERVER] ' . ($_POST['name'] ?? 'Unbekannt') . ': Aktualisiert.';
+                return t('message.server_updated', ['name' => ($_POST['name'] ?? t('common.unknown'))]);
             })(),
             'add_package' => (function () use ($repo): string {
                 $repo->addPackage($_POST);
-                return '[HOSTINGPLAN] ' . ($_POST['name'] ?? 'Unbekannt') . ': Angelegt.';
+                return t('message.hosting_created', ['name' => ($_POST['name'] ?? t('common.unknown'))]);
             })(),
             'queue_user' => (function () use ($repo): string {
                 $repo->queue('create_user', ($_POST['server_id'] ?? '') !== '' ? (int)$_POST['server_id'] : null, $_POST);
-                return '[USER] ' . ($_POST['username'] ?? 'Unbekannt') . ': Vorgemerkt.';
+                return t('message.user_queued', ['name' => ($_POST['username'] ?? t('common.unknown'))]);
             })(),
             'update_config' => (function () use ($repo): string {
                 $seconds = $repo->updateServerRefreshInterval((int)($_POST['server_refresh_interval'] ?? 60));
-                return '[KONFIGURATION] Server-Refresh: ' . $seconds . ' Sekunden gespeichert.';
+                $locale = $repo->updateLocale((string)($_POST['locale'] ?? current_locale()));
+                i18n_set_locale($locale);
+                return t('message.config_saved', ['seconds' => $seconds]);
             })(),
             'update_domain' => (function () use ($repo): string {
                 $repo->updateDomainBilling($_POST);
                 $domain = $repo->domain((int)$_POST['id']);
-                return '[Domain] ' . ($domain['domain'] ?? 'Unbekannt') . ': Gespeichert.';
+                return t('message.domain_saved', ['name' => ($domain['domain'] ?? t('common.unknown'))]);
             })(),
             'import_domains' => $sync->importDomains(),
             'import_hosting_plans' => $sync->importHostingPlans(),
             'run_sync' => $sync->runQueue(),
-            default => throw new RuntimeException('Unbekannte Aktion.'),
+            default => throw new RuntimeException('Unknown action.'),
         };
         redirect_with($message);
     } catch (Throwable $e) {
@@ -208,6 +219,7 @@ $domains = $repo->domains();
 $packages = $repo->packages();
 $actions = $repo->actions();
 $serverRefreshInterval = $repo->serverRefreshInterval();
+$appLocale = $repo->locale(current_locale());
 $serverRefreshIntervalOptions = Repository::refreshIntervalOptions();
 $allowedPages = ['dashboard', 'domains', 'users', 'hosting', 'server', 'config'];
 $page = (string)($_GET['page'] ?? 'dashboard');
@@ -218,12 +230,12 @@ $returnPath = '/?page=' . rawurlencode($page);
 $flash = $_SESSION['flash'] ?? null;
 unset($_SESSION['flash']);
 $navItems = [
-    'dashboard' => 'Dashboard',
-    'domains' => 'Domains',
-    'users' => 'User',
-    'hosting' => 'Hostingpakete',
-    'server' => 'Server',
-    'config' => 'Konfiguration',
+    'dashboard' => t('nav.dashboard'),
+    'domains' => t('nav.domains'),
+    'users' => t('nav.users'),
+    'hosting' => t('nav.hosting'),
+    'server' => t('nav.server'),
+    'config' => t('nav.config'),
 ];
 
 render_template('app', [
@@ -234,8 +246,11 @@ render_template('app', [
     'actions' => $actions,
     'serverRefreshInterval' => $serverRefreshInterval,
     'serverRefreshIntervalOptions' => $serverRefreshIntervalOptions,
+    'appLocale' => $appLocale,
     'page' => $page,
     'returnPath' => $returnPath,
     'flash' => $flash,
     'navItems' => $navItems,
+    'supportedLocales' => i18n_supported_locales(),
+    'jsMessages' => i18n_js_messages(),
 ]);

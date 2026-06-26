@@ -1,3 +1,8 @@
+const translations = window.KH_I18N || {};
+function tr(key, fallback = key) {
+    return translations[key] || fallback;
+}
+
 const dirtyDomainFields = new Set();
 const serverRefreshIntervalSeconds = Math.max(5, parseInt(document.body.dataset.serverRefreshInterval || '60', 10) || 60);
 
@@ -88,7 +93,7 @@ initDomainDirtyTracking();
 const refreshIconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-clockwise" viewBox="0 0 16 16" aria-hidden="true"><path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/></svg>';
 
 function serverHostnameHtml(status) {
-    const label = status.hostname || status.server_name || 'Unbekannt';
+    const label = status.hostname || status.server_name || tr('common.unknown', 'Unknown');
     if (!status.dashboard_url) {
         return '<span class="server-status-hostname">' + escapeHtml(label) + '</span>';
     }
@@ -107,17 +112,17 @@ function serverCardHtml(status) {
     const hiddenReboot = status.reboot_required && !status.error ? '' : ' hidden';
     return '<article class="server-card ' + (status.reboot_required ? 'needs-reboot' : '') + '" data-server-id="' + escapeHtml(status.server_id) + '">'
         + '<header><h2>' + serverHostnameHtml(status) + '</h2>'
-        + '<button type="button" class="server-status-refresh" title="Serverinfos aktualisieren" aria-label="Serverinfos aktualisieren">' + refreshIconSvg + '<span class="refresh-countdown" data-refresh-countdown></span></button></header>'
+        + '<button type="button" class="server-status-refresh" title="' + escapeHtml(tr('js.refresh_server', 'Refresh server information')) + '" aria-label="' + escapeHtml(tr('js.refresh_server', 'Refresh server information')) + '">' + refreshIconSvg + '<span class="refresh-countdown" data-refresh-countdown></span></button></header>'
         + '<p class="error-text server-status-error"' + hiddenError + '>' + escapeHtml(status.error || '') + '</p>'
         + '<dl class="server-facts"' + hiddenFacts + '>'
-        + serverFactHtml('OS:', 'os', status.os)
-        + serverFactHtml('Kernel:', 'kernel', status.kernel)
-        + serverFactHtml('Control Panel:', 'panel', status.panel)
-        + serverFactHtml('CPU:', 'cpu', status.cpu)
-        + serverFactHtml('Uptime:', 'uptime', status.uptime)
-        + serverFactHtml('Traffic im aktuellen Monat:', 'traffic', status.traffic)
-        + serverFactHtml('Verbrauchter Speicherplatz:', 'disk', status.disk)
-        + '</dl><p class="reboot-text"' + hiddenReboot + '>Reboot benoetigt</p></article>';
+        + serverFactHtml(tr('js.os', 'OS:'), 'os', status.os)
+        + serverFactHtml(tr('js.kernel', 'Kernel:'), 'kernel', status.kernel)
+        + serverFactHtml(tr('js.control_panel', 'Control Panel:'), 'panel', status.panel)
+        + serverFactHtml(tr('js.cpu', 'CPU:'), 'cpu', status.cpu)
+        + serverFactHtml(tr('js.uptime', 'Uptime:'), 'uptime', status.uptime)
+        + serverFactHtml(tr('js.traffic_current_month', 'Traffic this month:'), 'traffic', status.traffic)
+        + serverFactHtml(tr('js.consumed_disk', 'Consumed disk space:'), 'disk', status.disk)
+        + '</dl><p class="reboot-text"' + hiddenReboot + '>' + escapeHtml(tr('js.reboot_required', 'Reboot required')) + '</p></article>';
 }
 
 function serverFactHtml(label, field, value) {
@@ -134,7 +139,7 @@ async function loadDashboard() {
     body.set('_action', 'load_dashboard');
     try {
         const data = await postAjax(body);
-        grid.innerHTML = data.statuses.length ? data.statuses.map(serverCardHtml).join('') : '<p class="empty">Keine aktiven Server vorhanden.</p>';
+        grid.innerHTML = data.statuses.length ? data.statuses.map(serverCardHtml).join('') : '<p class="empty">' + escapeHtml(tr('js.no_active_servers', 'No active servers available.')) + '</p>';
         grid.querySelectorAll('.server-card[data-server-id]').forEach((card) => scheduleServerStatusRefresh(card));
     } catch (error) {
         grid.innerHTML = '<p class="error-text">' + escapeHtml(error.message) + '</p>';
@@ -152,7 +157,7 @@ async function loadUsers() {
     body.set('_action', 'load_users');
     try {
         const data = await postAjax(body);
-        result.innerHTML = data.groups.length ? data.groups.map(userGroupHtml).join('') : '<p class="empty">Keine aktiven Server vorhanden.</p>';
+        result.innerHTML = data.groups.length ? data.groups.map(userGroupHtml).join('') : '<p class="empty">' + escapeHtml(tr('js.no_active_servers', 'No active servers available.')) + '</p>';
         result.hidden = false;
         loader.hidden = true;
     } catch (error) {
@@ -163,14 +168,14 @@ async function loadUsers() {
 }
 
 function userGroupHtml(group) {
-    const title = '<h3>' + escapeHtml(group.server.name || 'Server') + '</h3>';
+    const title = '<h3>' + escapeHtml(group.server.name || tr('domains.server', 'Server')) + '</h3>';
     if (group.error) {
         return '<section class="server-user-group">' + title + '<p class="error-text">' + escapeHtml(group.error) + '</p></section>';
     }
     const rows = group.users.length
         ? group.users.map((user) => '<tr><td>' + escapeHtml(user.name) + '</td><td>' + escapeHtml(user.email || '') + '</td><td>' + escapeHtml(user.id || '') + '</td></tr>').join('')
-        : '<tr><td colspan="3" class="empty">Keine Benutzer gefunden.</td></tr>';
-    return '<section class="server-user-group">' + title + '<div class="table-wrap"><table class="compact-table"><thead><tr><th>Benutzer</th><th>E-Mail</th><th>ID</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
+        : '<tr><td colspan="3" class="empty">' + escapeHtml(tr('js.no_users_found', 'No users found.')) + '</td></tr>';
+    return '<section class="server-user-group">' + title + '<div class="table-wrap"><table class="compact-table"><thead><tr><th>' + escapeHtml(tr('js.user', 'User')) + '</th><th>' + escapeHtml(tr('js.email', 'Email')) + '</th><th>' + escapeHtml(tr('js.id', 'ID')) + '</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
 }
 
 if (document.body.dataset.page === 'dashboard') {
@@ -234,11 +239,11 @@ async function refreshServerStatus(card, manual) {
         const data = await postAjax(body);
         applyServerStatus(card, data.status);
         if (manual) {
-            showToast(data.message || '[SERVER] Status aktualisiert.');
+            showToast(data.message || '[SERVER] ' + tr('js.domain_updated', 'Status updated.'));
         }
     } catch (error) {
         applyServerStatus(card, {
-            hostname: card.querySelector('.server-status-hostname')?.textContent || 'Unbekannt',
+            hostname: card.querySelector('.server-status-hostname')?.textContent || tr('common.unknown', 'Unknown'),
             dashboard_url: card.querySelector('.server-dashboard-link')?.href || '',
             error: error.message,
             reboot_required: false,
@@ -280,7 +285,7 @@ window.addEventListener('beforeunload', (event) => {
         return;
     }
     event.preventDefault();
-    event.returnValue = 'Es gibt ungespeicherte Domain-Aenderungen.';
+    event.returnValue = tr('js.unsaved_domain_changes', 'There are unsaved domain changes.');
 });
 
 document.addEventListener('click', (event) => {
@@ -310,12 +315,12 @@ document.addEventListener('submit', async (event) => {
         summary.querySelector('.server-url').textContent = server.base_url;
         summary.querySelector('.server-key-preview').textContent = server.api_key_preview;
         const status = summary.querySelector('.status');
-        status.textContent = server.active ? 'aktiv' : 'inaktiv';
+        status.textContent = server.active ? tr('server.active', 'active') : tr('server.inactive', 'inactive');
         status.className = 'status ' + (server.active ? 'on' : 'off');
         form.querySelector('[name="api_token"]').value = '';
         form.hidden = true;
         summary.hidden = false;
-        showToast(data.message || 'Server gespeichert.');
+        showToast(data.message || tr('js.server_saved', 'Server saved.'));
     } catch (error) {
         showToast(error.message, 'error');
     } finally {
@@ -342,7 +347,7 @@ document.addEventListener('click', async (event) => {
         applyDomainData(row, data.domain, data.row_class, data.status_html);
         row.classList.add('row-saved');
         setTimeout(() => row.classList.remove('row-saved'), 900);
-        showToast(data.message || 'Domain gespeichert.');
+        showToast(data.message || tr('js.domain_saved', 'Domain saved.'));
     } catch (error) {
         showToast(error.message, 'error');
     } finally {
@@ -371,13 +376,13 @@ document.addEventListener('click', async (event) => {
             document.getElementById('subdomains-' + domainId)?.remove();
             row.remove();
             updateDuplicateClasses(domainName);
-            showToast(data.message || 'Domain lokal geloescht.');
+            showToast(data.message || tr('js.domain_deleted', 'Domain deleted locally.'));
             return;
         }
         applyDomainData(row, data.domain, data.row_class, data.status_html);
         row.classList.add('row-saved');
         setTimeout(() => row.classList.remove('row-saved'), 900);
-        showToast(data.message || 'Domain aktualisiert.');
+        showToast(data.message || tr('js.domain_updated', 'Domain updated.'));
     } catch (error) {
         showToast(error.message, 'error');
     } finally {
@@ -399,18 +404,18 @@ document.addEventListener('click', async (event) => {
         return;
     }
     button.disabled = true;
-    box.textContent = 'Wird geladen...';
+    box.textContent = tr('common.loading', 'Loading...');
     try {
         const params = new URLSearchParams({ ajax: 'subdomains', server_id: button.dataset.serverId, domain: button.dataset.domain });
         const response = await fetch('?' + params.toString(), { headers: { Accept: 'application/json' } });
         const data = await response.json();
         if (!response.ok || !data.ok) {
-            throw new Error(data.message || 'Subdomains konnten nicht geladen werden.');
+            throw new Error(data.message || tr('js.subdomains_failed', 'Subdomains could not be loaded.'));
         }
         button.dataset.loaded = '1';
         box.innerHTML = data.subdomains.length
             ? '<ul>' + data.subdomains.map((item) => '<li><b>' + escapeHtml(item.domain) + '</b><span>' + escapeHtml(item.owner || '') + '</span></li>').join('') + '</ul>'
-            : '<p>Keine Subdomains gefunden.</p>';
+            : '<p>' + escapeHtml(tr('js.no_subdomains', 'No subdomains found.')) + '</p>';
     } catch (error) {
         box.innerHTML = '<p class="error-text">' + escapeHtml(error.message) + '</p>';
     } finally {
@@ -423,7 +428,7 @@ async function postAjax(body) {
     const response = await fetch('', { method: 'POST', body, headers: { Accept: 'application/json' } });
     const data = await response.json();
     if (!response.ok || !data.ok) {
-        throw new Error(data.message || 'Speichern fehlgeschlagen.');
+        throw new Error(data.message || tr('js.save_failed', 'Save failed.'));
     }
     return data;
 }

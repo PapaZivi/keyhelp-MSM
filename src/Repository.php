@@ -19,6 +19,21 @@ final class Repository
         return $seconds;
     }
 
+    public function locale(string $default = 'de'): string
+    {
+        $value = $this->setting('locale', $default);
+        return array_key_exists($value, i18n_supported_locales()) ? $value : $default;
+    }
+
+    public function updateLocale(string $locale): string
+    {
+        if (!array_key_exists($locale, i18n_supported_locales())) {
+            throw new RuntimeException('Ungueltige Sprache.');
+        }
+        $this->saveSetting('locale', $locale);
+        return $locale;
+    }
+
     public static function refreshIntervalOptions(): array
     {
         return [5, 15, 30, 60, 90, 120, 180, 300];

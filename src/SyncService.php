@@ -15,7 +15,7 @@ final class SyncService
     {
         $server = $this->repo->server($serverId);
         if (!$server) {
-            throw new RuntimeException('Server nicht gefunden.');
+            throw new RuntimeException(t('message.server_not_found'));
         }
         return $this->dashboardServerEntry($server);
     }
@@ -44,7 +44,7 @@ final class SyncService
                 $result[] = [
                     'server' => $server,
                     'users' => [],
-                    'error' => 'Benutzerliste konnte nicht geladen werden. Details wurden ins Log geschrieben.',
+                    'error' => t('message.users_load_failed'),
                 ];
             }
         }
@@ -64,7 +64,7 @@ final class SyncService
                 $count++;
             }
         }
-        return '[DOMAINS] Alle Server: ' . $count . ' Hauptdomains aktualisiert.';
+        return t('message.domains_imported', ['count' => $count]);
     }
 
 
@@ -86,13 +86,13 @@ final class SyncService
             }
             $this->repo->deleteHostingPlansExcept((int)$server['id'], $externalIds);
         }
-        return '[HOSTINGPLAN] Alle Server: ' . $count . ' Hostingplaene aktualisiert.';
+        return t('message.hosting_imported', ['count' => $count]);
     }
     public function subdomainsFor(int $serverId, string $domainName): array
     {
         $server = $this->repo->server($serverId);
         if (!$server) {
-            throw new RuntimeException('Server nicht gefunden.');
+            throw new RuntimeException(t('message.server_not_found'));
         }
         $client = new KeyHelpClient($this->config, $server);
         $usersById = $this->usersById($client);
@@ -116,12 +116,12 @@ final class SyncService
     {
         $localDomain = $this->repo->domain($domainId);
         if (!$localDomain) {
-            throw new RuntimeException('Domain nicht gefunden.');
+            throw new RuntimeException(t('message.domain_not_found'));
         }
 
         $server = $this->repo->server((int)$localDomain['server_id']);
         if (!$server) {
-            throw new RuntimeException('Server nicht gefunden.');
+            throw new RuntimeException(t('message.server_not_found'));
         }
 
         $client = new KeyHelpClient($this->config, $server);
@@ -141,7 +141,7 @@ final class SyncService
             $this->repo->deleteDomain($domainId);
             return [
                 'status' => 'deleted',
-                'message' => '[Domain] ' . ($targetName ?: 'Unbekannt') . ': Auf dem Server nicht mehr gefunden und lokal geloescht.',
+                'message' => t('message.domain_deleted', ['name' => ($targetName ?: t('common.unknown'))]),
             ];
         }
 
@@ -149,12 +149,12 @@ final class SyncService
         $this->repo->saveDomain((int)$server['id'], $this->withOwnerDetails($client, $freshDomain, $usersById), $usersById);
         $updatedDomain = $this->repo->domain($domainId);
         if (!$updatedDomain) {
-            throw new RuntimeException('Domain konnte nach dem Aktualisieren nicht geladen werden.');
+            throw new RuntimeException(t('message.domain_reload_failed'));
         }
 
         return [
             'status' => 'updated',
-            'message' => '[Domain] ' . ($updatedDomain['domain'] ?? $targetName ?? 'Unbekannt') . ': Vom Server eingelesen.',
+            'message' => t('message.domain_refreshed', ['name' => ($updatedDomain['domain'] ?? $targetName ?? t('common.unknown'))]),
             'domain' => $updatedDomain,
         ];
     }
@@ -172,20 +172,20 @@ final class SyncService
                     $result = match ($action['type']) {
                         'create_user' => $client->createUser($payload),
                         'create_hosting_package' => $client->createHostingPackage($payload),
-                        default => throw new RuntimeException('Unbekannte Aktion: ' . $action['type']),
+                        default => throw new RuntimeException('Unknown action: ' . $action['type']),
                     };
                 }
                 $this->repo->markAction((int)$action['id'], 'done', $result ?? []);
                 $done++;
             }
-            $message = $done . ' Aktionen uebertragen.';
+            $message = t('message.actions_transferred', ['count' => $done]);
             $this->repo->finishSyncRun($runId, 'done', $message);
             return $message;
         } catch (Throwable $e) {
             if (isset($action)) {
                 $this->repo->markAction((int)$action['id'], 'failed', ['error' => $e->getMessage()]);
             }
-            $message = 'Sync gestoppt: ' . $e->getMessage();
+            $message = t('message.sync_stopped', ['message' => $e->getMessage()]);
             $this->repo->finishSyncRun($runId, 'failed', $message);
             throw new RuntimeException($message, 0, $e);
         }
@@ -207,7 +207,7 @@ final class SyncService
             return [
                 'server' => $server,
                 'info' => [],
-                'error' => 'Serverstatus konnte nicht geladen werden. Details wurden ins Log geschrieben.',
+                'error' => t('message.server_status_failed'),
             ];
         }
     }

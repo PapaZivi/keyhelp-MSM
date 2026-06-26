@@ -18,6 +18,35 @@ input, select, textarea { width: 100%; border: 1px solid var(--line); border-rad
 textarea { min-height: 82px; resize: vertical; }
 .topbar { height: 66px; padding: 0 28px; background: #fff; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 2; }
 .topbar > div, .top-actions { display: flex; align-items: center; gap: 12px; }
+.language-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: #fff;
+    padding: 3px;
+}
+.language-switch a {
+    min-height: 30px;
+    padding: 0 9px;
+    border-radius: 5px;
+    color: var(--muted);
+    text-decoration: none;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+}
+.language-switch a:hover,
+.language-switch a.active {
+    color: var(--blue);
+    background: rgba(29, 95, 191, .08);
+}
+.login-language {
+    position: fixed;
+    top: 18px;
+    right: 18px;
+}
 .brand-mark { width: 34px; height: 34px; border-radius: 7px; background: linear-gradient(135deg, var(--blue), var(--cyan)); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 900; }
 .layout { max-width: 1420px; margin: 0 auto; padding: 26px; }
 .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; }
