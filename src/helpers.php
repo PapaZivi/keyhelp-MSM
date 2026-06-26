@@ -154,6 +154,7 @@ function server_status_view(array $entry): array
     return [
         'server_id' => (int)($server['id'] ?? 0),
         'server_name' => (string)($server['name'] ?? ''),
+        'dashboard_url' => rtrim((string)($server['base_url'] ?? ''), '/') . '/index.php?page=admin_dashboard',
         'hostname' => $hostname,
         'reboot_required' => (bool)value_path($info, 'operating_system.updates.reboot_required', false),
         'os' => (string)value_path($info, 'operating_system.label', '-'),

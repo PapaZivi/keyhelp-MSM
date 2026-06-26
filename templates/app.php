@@ -57,8 +57,8 @@
                             <td><?= h($domain['domain']) ?></td>
                             <td><?= h($domain['server_name']) ?></td>
                             <td><?= h($domain['owner_name'] ?: ($domain['owner_external_id'] ? 'User #' . $domain['owner_external_id'] : '')) ?></td>
-                            <td><?php if ($domain['registered_at']): ?><span class="readonly-value" data-field="registered_at"><?= h($domain['registered_at']) ?></span><?php else: ?><input type="date" name="registered_at" value=""><?php endif; ?></td>
-                            <td><?php if ($domain['next_billing_at']): ?><span class="readonly-value" data-field="next_billing_at"><?= h($domain['next_billing_at']) ?></span><?php else: ?><input type="date" name="next_billing_at" value=""><?php endif; ?></td>
+                            <td><?php if ($domain['registered_at']): ?><span class="readonly-value" data-field="registered_at"><?= h(date_format(new DateTime($domain['registered_at']), 'd.m.Y')) ?></span><?php else: ?><input type="date" name="registered_at" value=""><?php endif; ?></td>
+                            <td><?php if ($domain['next_billing_at']): ?><span class="readonly-value" data-field="next_billing_at"><?= h(date_format(new DateTime($domain['next_billing_at']), 'd.m.Y')) ?></span><?php else: ?><input type="date" name="next_billing_at" value=""><?php endif; ?></td>
                             <td><input name="registrar" value="<?= h($domain['registrar']) ?>"></td>
                             <td class="domain-status-cell"><?= domain_status_html($domain) ?></td>
                             <td><button type="button" class="subdomain-toggle" data-server-id="<?= (int)$domain['server_id'] ?>" data-domain="<?= h($domain['domain']) ?>">anzeigen</button></td>
