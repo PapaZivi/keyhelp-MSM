@@ -42,6 +42,30 @@ body { background: var(--kh-soft); }
     gap: .7rem;
     padding: 0 .375rem;
 }
+
+.app-logo-link {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    text-decoration: none;
+}
+.app-logo {
+    display: block;
+    height: auto;
+    max-width: 100%;
+    object-fit: contain;
+}
+.app-logo-sidebar {
+    width: min(218px, 100%);
+}
+.auth-logo-wrap {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 1.25rem;
+}
+.app-logo-auth {
+    width: min(270px, 82vw);
+}
 .side-nav { align-content: start; gap: .25rem; }
 .side-nav .nav-link { font-weight: 800; }
 .app-main { min-width: 0; }
@@ -55,7 +79,7 @@ body { background: var(--kh-soft); }
     place-items: center;
     padding: 1.5rem;
 }
-.login-card { width: min(420px, 100%); }
+.login-card { width: min(430px, 100%); }
 .login-card .brand-mark { width: 42px; height: 42px; }
 .login-language { position: fixed; top: 1rem; right: 1rem; }
 .stack { display: grid; gap: .75rem; }
@@ -177,3 +201,26 @@ body { background: var(--kh-soft); }
     .topbar { padding: .75rem 1rem; align-items: flex-start; }
     .layout { padding: 1rem; }
 }
+[data-bs-theme="dark"] {
+    --kh-line: rgba(148, 163, 184, .22);
+    --kh-soft: #101827;
+}
+
+[data-bs-theme="dark"] body { background: var(--kh-soft); }
+[data-bs-theme="dark"] .bg-white { background-color: var(--bs-body-bg) !important; }
+[data-bs-theme="dark"] .border-end,
+[data-bs-theme="dark"] .border-bottom,
+[data-bs-theme="dark"] .border,
+[data-bs-theme="dark"] .card { border-color: var(--kh-line) !important; }
+[data-bs-theme="dark"] .sidebar,
+[data-bs-theme="dark"] .topbar,
+[data-bs-theme="dark"] .card,
+[data-bs-theme="dark"] .login-card { box-shadow: none; }
+[data-bs-theme="dark"] .domain-state { background: var(--bs-tertiary-bg); }
+[data-bs-theme="dark"] .domain-duplicate td { background: rgba(245, 158, 11, .24); }
+[data-bs-theme="dark"] .domain-disabled td { background: rgba(194, 65, 58, .2); }
+[data-bs-theme="dark"] .domain-delete-pending td { background: rgba(29, 95, 191, .22); }
+[data-bs-theme="dark"] .skeleton-line,
+[data-bs-theme="dark"] .skeleton-circle,
+[data-bs-theme="dark"] .skeleton-facts span { background: linear-gradient(90deg, #1f2937, #334155, #1f2937); background-size: 200% 100%; }
+[data-bs-theme="dark"] .spinner { border-color: #334155; border-top-color: var(--kh-blue); }

@@ -79,7 +79,7 @@
         "login.user": "Benutzer",
         "message.actions_transferred": "{count} Aktionen uebertragen.",
         "message.app_failed": "Die Anwendung konnte die Anfrage nicht verarbeiten. Details wurden ins Log geschrieben.",
-        "message.config_saved": "[KONFIGURATION] Server-Refresh: {seconds} Sekunden gespeichert.",
+        "message.config_saved": "[KONFIGURATION] Server-Refresh: {interval} gespeichert.",
         "message.domain_deleted": "[Domain] {name}: Auf dem Server nicht mehr gefunden und lokal geloescht.",
         "message.domain_not_found": "Domain nicht gefunden.",
         "message.domain_refreshed": "[Domain] {name}: Vom Server eingelesen.",
@@ -125,6 +125,13 @@
         "users.queue_action": "Aktion vormerken",
         "users.queue_title": "Benutzer vormerken",
         "users.title": "Benutzer",
-        "users.username": "Benutzername"
+        "users.username": "Benutzername",
+        "common.off": "aus",
+        "config.theme_mode": "Darstellung",
+        "theme.light": "hell",
+        "theme.dark": "dunkel",
+        "theme.auto": "System/Auto",
+        "language.iso2": "DE",
+        "language.iso3": "DEU"
     }
 }

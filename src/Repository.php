@@ -3,7 +3,6 @@ final class Repository
 {
     public function __construct(private PDO $pdo) {}
 
-
     public function serverRefreshInterval(): int
     {
         $value = (int)$this->setting('server_refresh_interval', '60');
@@ -33,10 +32,28 @@ final class Repository
         $this->saveSetting('locale', $locale);
         return $locale;
     }
+    public function themeMode(): string
+    {
+        $value = $this->setting('theme_mode', 'auto');
+        return in_array($value, self::themeModeOptions(), true) ? $value : 'auto';
+    }
+
+    public function updateThemeMode(string $mode): string
+    {
+        if (!in_array($mode, self::themeModeOptions(), true)) {
+            throw new RuntimeException('Ungueltiger Darkmode.');
+        }
+        $this->saveSetting('theme_mode', $mode);
+        return $mode;
+    }
 
     public static function refreshIntervalOptions(): array
     {
-        return [5, 15, 30, 60, 90, 120, 180, 300];
+        return [0, 5, 15, 30, 60, 90, 120, 180, 300];
+    }
+    public static function themeModeOptions(): array
+    {
+        return ['auto', 'light', 'dark'];
     }
 
     private function setting(string $key, string $default = ''): string
@@ -59,6 +76,7 @@ final class Repository
     {
         $this->pdo->exec('CREATE TABLE IF NOT EXISTS app_settings (setting_key VARCHAR(80) PRIMARY KEY, setting_value TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
     }
+
     public function servers(bool $activeOnly = false): array
     {
         $sql = 'SELECT * FROM servers' . ($activeOnly ? ' WHERE active = 1' : '') . ' ORDER BY name';
@@ -105,6 +123,7 @@ final class Repository
             ORDER BY d.domain, s.name
         ')->fetchAll();
     }
+
     public function packages(): array
     {
         return $this->pdo->query('SELECT p.*, s.name AS server_name FROM hosting_packages p LEFT JOIN servers s ON s.id = p.server_id ORDER BY p.name')->fetchAll();
@@ -181,6 +200,7 @@ final class Repository
         }
         return '';
     }
+
     public function queue(string $type, ?int $serverId, array $payload): void
     {
         $stmt = $this->pdo->prepare('INSERT INTO planned_actions(type, server_id, payload_json) VALUES(?, ?, ?)');

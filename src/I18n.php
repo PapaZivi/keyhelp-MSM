@@ -87,6 +87,16 @@ function t(string $key, array $params = []): string
     return $text;
 }
 
+function i18n_translate(string $key, array $params = [], string $fallback = '', ?string $locale = null): string
+{
+    $messages = $locale === null ? ($GLOBALS['i18n_messages'] ?? []) : i18n_load_messages($locale);
+    $text = (string)($messages[$key] ?? ($fallback !== '' ? $fallback : $key));
+    foreach ($params as $name => $value) {
+        $text = str_replace('{' . $name . '}', (string)$value, $text);
+    }
+    return $text;
+}
+
 function i18n_js_messages(): array
 {
     $messages = $GLOBALS['i18n_messages'] ?? [];

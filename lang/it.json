@@ -79,7 +79,7 @@
         "login.user": "Utente",
         "message.actions_transferred": "{count} azioni trasferite.",
         "message.app_failed": "L'applicazione non ha potuto elaborare la richiesta. I dettagli sono stati scritti nel log.",
-        "message.config_saved": "[CONFIGURAZIONE] Aggiornamento server: {seconds} secondi salvati.",
+        "message.config_saved": "[CONFIGURAZIONE] Aggiornamento server: {interval} salvato.",
         "message.domain_deleted": "[Dominio] {name}: Non trovato sul server ed eliminato localmente.",
         "message.domain_not_found": "Dominio non trovato.",
         "message.domain_refreshed": "[Dominio] {name}: Importato dal server.",
@@ -125,6 +125,13 @@
         "users.queue_action": "Accoda azione",
         "users.queue_title": "Accoda utente",
         "users.title": "Utenti",
-        "users.username": "Nome utente"
+        "users.username": "Nome utente",
+        "common.off": "disattivato",
+        "config.theme_mode": "Aspetto",
+        "theme.light": "chiaro",
+        "theme.dark": "scuro",
+        "theme.auto": "sistema/auto",
+        "language.iso2": "IT",
+        "language.iso3": "ITA"
     }
 }

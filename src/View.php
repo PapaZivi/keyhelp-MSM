@@ -8,3 +8,8 @@ function render_template(string $template, array $data = []): void
     extract($data, EXTR_SKIP);
     require $path;
 }
+
+function render_partial(string $template, array $data = []): void
+{
+    render_template('partials/' . $template, $data);
+}

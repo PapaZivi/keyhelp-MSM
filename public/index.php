@@ -191,8 +191,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'update_config' => (function () use ($repo): string {
                 $seconds = $repo->updateServerRefreshInterval((int)($_POST['server_refresh_interval'] ?? 60));
                 $locale = $repo->updateLocale((string)($_POST['locale'] ?? current_locale()));
+                $repo->updateThemeMode((string)($_POST['theme_mode'] ?? 'light'));
                 i18n_set_locale($locale);
-                return t('message.config_saved', ['seconds' => $seconds]);
+                $interval = $seconds === 0 ? t('common.off') : $seconds . ' ' . t('common.seconds');
+                return t('message.config_saved', ['interval' => $interval, 'seconds' => $seconds]);
             })(),
             'update_domain' => (function () use ($repo): string {
                 $repo->updateDomainBilling($_POST);
@@ -220,7 +222,9 @@ $packages = $repo->packages();
 $actions = $repo->actions();
 $serverRefreshInterval = $repo->serverRefreshInterval();
 $appLocale = $repo->locale(current_locale());
+$themeMode = $repo->themeMode();
 $serverRefreshIntervalOptions = Repository::refreshIntervalOptions();
+$themeModeOptions = Repository::themeModeOptions();
 $allowedPages = ['dashboard', 'domains', 'users', 'hosting', 'server', 'config'];
 $page = (string)($_GET['page'] ?? 'dashboard');
 if (!in_array($page, $allowedPages, true)) {
@@ -246,6 +250,8 @@ render_template('app', [
     'actions' => $actions,
     'serverRefreshInterval' => $serverRefreshInterval,
     'serverRefreshIntervalOptions' => $serverRefreshIntervalOptions,
+    'themeMode' => $themeMode,
+    'themeModeOptions' => $themeModeOptions,
     'appLocale' => $appLocale,
     'page' => $page,
     'returnPath' => $returnPath,

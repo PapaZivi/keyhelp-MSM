@@ -79,7 +79,7 @@
         "login.user": "Uzanto",
         "message.actions_transferred": "{count} agoj transdonitaj.",
         "message.app_failed": "La aplikaĵo ne povis prilabori la peton. Detaloj estis skribitaj en la protokolo.",
-        "message.config_saved": "[AGORDO] Servila refreŝigo: {seconds} sekundoj konservitaj.",
+        "message.config_saved": "[AGORDO] Servila refreŝigo: {interval} konservita.",
         "message.domain_deleted": "[Domajno] {name}: Ne trovita sur la servilo kaj forigita loke.",
         "message.domain_not_found": "Domajno ne trovita.",
         "message.domain_refreshed": "[Domajno] {name}: Importita de la servilo.",
@@ -125,6 +125,13 @@
         "users.queue_action": "Envicigi agon",
         "users.queue_title": "Envicigi uzanton",
         "users.title": "Uzantoj",
-        "users.username": "Uzantnomo"
+        "users.username": "Uzantnomo",
+        "common.off": "malŝaltita",
+        "config.theme_mode": "Aspekto",
+        "theme.light": "hela",
+        "theme.dark": "malhela",
+        "theme.auto": "sistemo/aŭtomata",
+        "language.iso2": "EO",
+        "language.iso3": "EPO"
     }
 }

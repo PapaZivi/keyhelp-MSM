@@ -1,10 +1,25 @@
+function applyThemeMode() {
+    const root = document.documentElement;
+    const mode = root.dataset.themeMode || 'light';
+    const resolved = mode === 'auto' && window.matchMedia
+        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : (mode === 'dark' ? 'dark' : 'light');
+    root.setAttribute('data-bs-theme', resolved);
+}
+
+applyThemeMode();
+if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyThemeMode);
+}
 const translations = window.KH_I18N || {};
 function tr(key, fallback = key) {
     return translations[key] || fallback;
 }
 
 const dirtyDomainFields = new Set();
-const serverRefreshIntervalSeconds = Math.max(5, parseInt(document.body.dataset.serverRefreshInterval || '60', 10) || 60);
+const serverRefreshIntervalRaw = document.body.getAttribute('data-server-refresh-interval');
+const configuredServerRefreshInterval = serverRefreshIntervalRaw === null ? 60 : parseInt(serverRefreshIntervalRaw, 10);
+const serverRefreshIntervalSeconds = Number.isFinite(configuredServerRefreshInterval) && configuredServerRefreshInterval >= 0 ? configuredServerRefreshInterval : 60;
 
 function initDomainDirtyTracking(scope = document) {
     scope.querySelectorAll('.domain-row input[name="registered_at"], .domain-row input[name="next_billing_at"], .domain-row input[name="registrar"]').forEach((field) => {
@@ -210,6 +225,11 @@ function scheduleServerStatusRefresh(card) {
         clearTimeout(oldState.timeout);
         clearInterval(oldState.interval);
     }
+    serverStatusTimers.delete(card);
+    if (serverRefreshIntervalSeconds === 0) {
+        updateServerRefreshCountdown(card, '');
+        return;
+    }
     let remaining = serverRefreshIntervalSeconds;
     updateServerRefreshCountdown(card, remaining);
     const interval = setInterval(() => {
@@ -223,10 +243,9 @@ function scheduleServerStatusRefresh(card) {
 function updateServerRefreshCountdown(card, remaining) {
     const target = card.querySelector('[data-refresh-countdown]');
     if (target) {
-        target.textContent = String(remaining);
+        target.textContent = remaining === '' ? '' : String(remaining);
     }
 }
-
 async function refreshServerStatus(card, manual) {
     const button = card.querySelector('.server-status-refresh');
     const body = new FormData();

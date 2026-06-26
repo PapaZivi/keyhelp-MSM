@@ -79,7 +79,7 @@
         "login.user": "User",
         "message.actions_transferred": "{count} actions transferred.",
         "message.app_failed": "The application could not process the request. Details were written to the log.",
-        "message.config_saved": "[CONFIGURATION] Server refresh: {seconds} seconds saved.",
+        "message.config_saved": "[CONFIGURATION] Server refresh: {interval} saved.",
         "message.domain_deleted": "[Domain] {name}: Not found on the server and deleted locally.",
         "message.domain_not_found": "Domain not found.",
         "message.domain_refreshed": "[Domain] {name}: Imported from server.",
@@ -125,6 +125,13 @@
         "users.queue_action": "Queue action",
         "users.queue_title": "Queue user",
         "users.title": "Users",
-        "users.username": "Username"
+        "users.username": "Username",
+        "common.off": "off",
+        "config.theme_mode": "Appearance",
+        "theme.light": "light",
+        "theme.dark": "dark",
+        "theme.auto": "system/auto",
+        "language.iso2": "EN",
+        "language.iso3": "ENG"
     }
 }

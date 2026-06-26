@@ -1,18 +1,12 @@
+<?php $initialTheme = ($themeMode ?? 'auto') === 'dark' ? 'dark' : 'light'; ?>
 <!doctype html>
-<html lang="<?= h(current_locale()) ?>">
+<html lang="<?= h(current_locale()) ?>" data-theme-mode="<?= h($themeMode ?? 'auto') ?>" data-bs-theme="<?= h($initialTheme) ?>">
 
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title><?= h($config['app']['name']) ?></title>
-        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
-        <link rel="stylesheet" href="node_modules/dashbrd/dist/assets/css/theme.bundle.css">
-        <link rel="stylesheet" href="/assets/app.css">
-    </head>
+    <?php render_partial('head', ['config' => $config, 'title' => $config['app']['name']]); ?>
 
     <body class="app-shell" data-page="<?= h($page) ?>" data-server-refresh-interval="<?= (int)$serverRefreshInterval ?>">
         <aside class="sidebar bg-white border-end">
-            <div class="sidebar-brand"><span class="brand-mark">K</span><strong><?= h($config['app']['name']) ?></strong></div>
+            <a class="sidebar-brand app-logo-link" href="/" aria-label="<?= h($config['app']['name']) ?>"><img class="app-logo app-logo-sidebar" src="/assets/khmsm_fulllogo_512.png" alt="<?= h($config['app']['name']) ?>"></a>
             <nav class="side-nav nav nav-pills flex-column" aria-label="<?= h(t('nav.dashboard')) ?>">
                 <?php foreach ($navItems as $navPage => $label): ?>
                 <a class="nav-link <?= $page === $navPage ? 'active' : '' ?>" href="/?page=<?= h($navPage) ?>">
@@ -227,7 +221,7 @@
                         <div class="section-head">
                             <h2 class="h5 mb-0"><?= h(t('config.title')) ?></h2>
                         </div>
-                        <form method="post" class="settings-form mt-3"><input type="hidden" name="_action" value="update_config"><input type="hidden" name="_return" value="<?= h($returnPath) ?>"><label class="form-label" for="locale"><?= h(t('common.language')) ?></label><select class="form-select" id="locale" name="locale"><?php foreach ($supportedLocales as $localeCode => $localeLabel): ?><option value="<?= h($localeCode) ?>" <?= $localeCode === $appLocale ? 'selected' : '' ?>><?= h($localeLabel) ?></option><?php endforeach; ?></select><label class="form-label" for="server_refresh_interval"><?= h(t('config.refresh_interval')) ?></label><select class="form-select" id="server_refresh_interval" name="server_refresh_interval"><?php foreach ($serverRefreshIntervalOptions as $option): ?><option value="<?= (int)$option ?>" <?= (int)$option === (int)$serverRefreshInterval ? 'selected' : '' ?>><?= (int)$option ?> <?= h(t('common.seconds')) ?></option><?php endforeach; ?></select><button class="btn btn-primary"><?= h(t('config.save')) ?></button></form>
+                        <form method="post" class="settings-form mt-3"><input type="hidden" name="_action" value="update_config"><input type="hidden" name="_return" value="<?= h($returnPath) ?>"><label class="form-label" for="locale"><?= h(t('common.language')) ?></label><select class="form-select" id="locale" name="locale"><?php foreach ($supportedLocales as $localeCode => $localeLabel): ?><option value="<?= h($localeCode) ?>" <?= $localeCode === $appLocale ? 'selected' : '' ?>><?= h($localeLabel) ?></option><?php endforeach; ?></select><label class="form-label" for="theme_mode"><?= h(t('config.theme_mode')) ?></label><select class="form-select" id="theme_mode" name="theme_mode"><?php foreach ($themeModeOptions as $option): ?><option value="<?= h($option) ?>" <?= $option === $themeMode ? 'selected' : '' ?>><?= h(t('theme.' . $option)) ?></option><?php endforeach; ?></select><label class="form-label" for="server_refresh_interval"><?= h(t('config.refresh_interval')) ?></label><select class="form-select" id="server_refresh_interval" name="server_refresh_interval"><?php foreach ($serverRefreshIntervalOptions as $option): ?><option value="<?= (int)$option ?>" <?= (int)$option === (int)$serverRefreshInterval ? 'selected' : '' ?>><?= (int)$option === 0 ? h(t('common.off')) : (int)$option . ' ' . h(t('common.seconds')) ?></option><?php endforeach; ?></select><button class="btn btn-primary"><?= h(t('config.save')) ?></button></form>
                     </div>
                 </section>
                 <?php endif; ?>
@@ -235,8 +229,8 @@
         </div>
         <script>window.KH_I18N = <?= json_encode($jsMessages, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;</script>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
-        <script src="node_modules/dashbrd/dist/assets/js/theme.bundle.js"></script>
-        <script type="module" src="/assets/app.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/dashbrd/dist/assets/js/theme.bundle.js"></script>
+        <script type="module" src="/assets/app.js?v=<?= (int)filemtime(dirname(__DIR__) . '/public/assets/app.js') ?>"></script>
     </body>
 
 </html>

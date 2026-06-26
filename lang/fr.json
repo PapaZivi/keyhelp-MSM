@@ -79,7 +79,7 @@
         "login.user": "Utilisateur",
         "message.actions_transferred": "{count} actions transférées.",
         "message.app_failed": "L'application n'a pas pu traiter la demande. Les détails ont été écrits dans le journal.",
-        "message.config_saved": "[CONFIGURATION] Actualisation du serveur : {seconds} secondes enregistrées.",
+        "message.config_saved": "[CONFIGURATION] Actualisation du serveur : {interval} enregistrée.",
         "message.domain_deleted": "[Domaine] {name} : Introuvable sur le serveur et supprimé localement.",
         "message.domain_not_found": "Domaine introuvable.",
         "message.domain_refreshed": "[Domaine] {name} : Importé depuis le serveur.",
@@ -125,6 +125,13 @@
         "users.queue_action": "Mettre l'action en file d'attente",
         "users.queue_title": "Mettre l'utilisateur en file d'attente",
         "users.title": "Utilisateurs",
-        "users.username": "Nom d'utilisateur"
+        "users.username": "Nom d'utilisateur",
+        "common.off": "désactivé",
+        "config.theme_mode": "Apparence",
+        "theme.light": "clair",
+        "theme.dark": "sombre",
+        "theme.auto": "système/auto",
+        "language.iso2": "FR",
+        "language.iso3": "FRA"
     }
 }
