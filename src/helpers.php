@@ -163,6 +163,7 @@ function user_email(array $user): string
     }
     return '';
 }
+
 function server_status_view(array $entry): array
 {
     $server = $entry['server'] ?? [];

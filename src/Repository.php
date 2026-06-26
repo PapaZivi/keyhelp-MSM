@@ -140,7 +140,6 @@ final class Repository
         $this->queue('create_hosting_package', $data['server_id'] ?: null, $data);
     }
 
-
     public function saveHostingPlan(int $serverId, array $plan): void
     {
         $externalId = (string)($plan['id'] ?? $plan['external_id'] ?? '');
@@ -211,6 +210,7 @@ final class Repository
             $this->dateOnly($domain['delete_on'] ?? null),
         ]);
     }
+
     private function dateOnly(mixed $value): ?string
     {
         if ($value === null || $value === '') {

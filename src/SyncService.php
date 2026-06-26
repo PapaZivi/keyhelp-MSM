@@ -5,7 +5,6 @@ final class SyncService
 
     public function __construct(private array $config, private Repository $repo) {}
 
-
     public function dashboardServers(): array
     {
         return array_map(fn(array $server): array => $this->dashboardServerEntry($server), $this->repo->servers(true));
@@ -50,6 +49,7 @@ final class SyncService
         }
         return $result;
     }
+
     public function importDomains(): string
     {
         $count = 0;
@@ -66,7 +66,6 @@ final class SyncService
         }
         return t('message.domains_imported', ['count' => $count]);
     }
-
 
     public function importHostingPlans(): string
     {
@@ -88,6 +87,7 @@ final class SyncService
         }
         return t('message.hosting_imported', ['count' => $count]);
     }
+
     public function subdomainsFor(int $serverId, string $domainName): array
     {
         $server = $this->repo->server($serverId);
@@ -191,8 +191,6 @@ final class SyncService
         }
     }
 
-
-
     private function dashboardServerEntry(array $server): array
     {
         try {
@@ -211,6 +209,7 @@ final class SyncService
             ];
         }
     }
+
     private function logViewError(Throwable $exception, string $message, array $server): void
     {
         if (function_exists('log_exception')) {
@@ -220,6 +219,7 @@ final class SyncService
             ]);
         }
     }
+
     private function mainDomains(array $domains, array $server): array
     {
         $domains = $this->withoutSystemDomains($domains, $server);

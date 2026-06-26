@@ -43,11 +43,11 @@ final class KeyHelpClient
         return $this->request('POST', $this->endpoint('clients'), $payload, 'KeyHelp-Client auf dem Zielserver anlegen.');
     }
 
-
     public function listHostingPlans(): array
     {
         return $this->request('GET', $this->endpoint('hosting_plans'), null, 'Hostingplaene des KeyHelp-Servers abrufen.');
     }
+
     public function createHostingPackage(array $payload): array
     {
         return $this->request('POST', $this->endpoint('hosting_plans'), $payload, 'Hostingpaket auf den Zielserver übertragen.');

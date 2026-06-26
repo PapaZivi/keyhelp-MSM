@@ -55,7 +55,6 @@ final class Database
         self::addIndexIfMissing($pdo, 'hosting_packages', 'uniq_server_hosting_package', 'UNIQUE KEY `uniq_server_hosting_package` (`server_id`, `external_id`)');
     }
 
-
     private static function dropIndexIfExists(PDO $pdo, string $table, string $index): void
     {
         $stmt = $pdo->prepare('SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?');
@@ -73,6 +72,7 @@ final class Database
             $pdo->exec('ALTER TABLE `' . $table . '` ADD ' . $definition);
         }
     }
+
     private static function addColumnIfMissing(PDO $pdo, string $table, string $column, string $definition): void
     {
         $stmt = $pdo->prepare('SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
