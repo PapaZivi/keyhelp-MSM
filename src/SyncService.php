@@ -18,36 +18,627 @@ final class SyncService
         }
         return $this->dashboardServerEntry($server);
     }
+    public function rebootServer(int $serverId): string
+    {
+        $server = $this->repo->server($serverId);
+        if (!$server) {
+            throw new RuntimeException(t('message.server_not_found'));
+        }
+        (new KeyHelpClient($this->config, $server))->rebootServer();
+        return t('message.server_reboot_started', ['name' => ($server['name'] ?? t('common.unknown'))]);
+    }
 
     public function userOverview(): array
     {
-        $result = [];
-        foreach ($this->repo->servers(true) as $server) {
-            try {
-                $client = new KeyHelpClient($this->config, $server);
-                $users = $this->normalizeList($client->listUsers());
-                foreach ($users as &$user) {
-                    if (is_array($user)) {
-                        $user['_server_id'] = (int)$server['id'];
-                        $user['_server_name'] = $server['name'];
-                    }
+        return $this->repo->usersByServer();
+    }
+
+    public function deleteServer(int $serverId): string
+    {
+        $server = $this->repo->server($serverId);
+        if (!$server) {
+            throw new RuntimeException(t('message.server_not_found'));
+        }
+        $name = (string)($server['name'] ?? t('common.unknown'));
+        $this->repo->deleteServer($serverId);
+        return t('message.server_updated', ['name' => $name]);
+    }
+
+    public function deleteHostingPackage(int $packageId): string
+    {
+        $package = $this->repo->package($packageId);
+        if (!$package) {
+            throw new RuntimeException('Hostingpaket nicht gefunden.');
+        }
+        $name = (string)($package['name'] ?? t('common.unknown'));
+        $marker = $this->hostingPackageMarker($package, $packageId);
+        foreach ($this->repo->packages() as $candidate) {
+            if ($this->hostingPackageMarker($candidate, (int)$candidate['id']) !== $marker) {
+                continue;
+            }
+            $externalId = (string)($candidate['external_id'] ?? '');
+            $serverId = (int)($candidate['server_id'] ?? 0);
+            if ($externalId !== '' && $serverId > 0) {
+                $server = $this->repo->server($serverId);
+                if (!$server) {
+                    throw new RuntimeException(t('message.server_not_found'));
                 }
-                unset($user);
-                $result[] = [
-                    'server' => $server,
-                    'users' => array_values(array_filter($users, 'is_array')),
-                    'error' => '',
-                ];
-            } catch (Throwable $e) {
-                $this->logViewError($e, 'Benutzerliste konnte nicht geladen werden.', $server);
-                $result[] = [
-                    'server' => $server,
-                    'users' => [],
-                    'error' => t('message.users_load_failed'),
-                ];
+                (new KeyHelpClient($this->config, $server))->deleteHostingPackage($externalId);
+            }
+            $this->repo->deletePackage((int)$candidate['id']);
+        }
+        return t('message.hosting_created', ['name' => $name]);
+    }
+    public function importUsers(?int $serverId = null): string
+    {
+        $count = 0;
+        foreach ($this->targetServers($serverId) as $server) {
+            $client = new KeyHelpClient($this->config, $server);
+            $users = array_values(array_filter($this->normalizeList($client->listUsers()), 'is_array'));
+            $externalIds = [];
+            foreach ($users as $user) {
+                $externalId = $this->repo->userExternalId($user);
+                if ($externalId === '') {
+                    continue;
+                }
+                try {
+                    $detail = $this->normalizeItem($client->getClient($externalId));
+                    if ($detail !== []) {
+                        $user = array_replace_recursive($user, $detail);
+                    }
+                } catch (Throwable) {
+                    // Keep the list representation if the detail endpoint is unavailable.
+                }
+                $externalIds[] = $externalId;
+                $this->repo->saveUser((int)$server['id'], $user);
+                $count++;
+            }
+            $this->repo->deleteUsersExcept((int)$server['id'], $externalIds);
+        }
+        return t('message.users_imported', ['count' => $count]);
+    }
+
+    public function createUser(int $serverId, array $data): string
+    {
+        $server = $this->repo->server($serverId);
+        if (!$server) {
+            throw new RuntimeException(t('message.server_not_found'));
+        }
+        $payload = $this->createUserPayload($data);
+        $client = new KeyHelpClient($this->config, $server);
+        $response = $client->createUser($payload);
+        $externalId = $this->createdUserId($response);
+        if ($externalId === '') {
+            $externalId = $this->createdUserIdFromList($client, (string)($data['username'] ?? ''));
+        }
+        if ($externalId === '') {
+            throw new RuntimeException(t('message.user_created', ['name' => ($data['username'] ?? t('common.unknown'))]) . ' Die neue KeyHelp-Benutzer-ID konnte nicht ermittelt werden.');
+        }
+        $this->applyTemporaryHostingPlan($client, $externalId, $data, (string)($data['username'] ?? ''));
+        $this->importUsers($serverId);
+        return t('message.user_created', ['name' => ($data['username'] ?? t('common.unknown'))]);
+    }
+
+    public function updateUser(int $localUserId, array $data): string
+    {
+        $user = $this->repo->user($localUserId);
+        if (!$user) {
+            throw new RuntimeException(t('message.user_not_found'));
+        }
+        $server = $this->repo->server((int)$user['server_id']);
+        if (!$server) {
+            throw new RuntimeException(t('message.server_not_found'));
+        }
+        $payload = $this->createUserPayload($data);
+        $payload['username'] = (string)$user['username'];
+        if (trim((string)($data['password'] ?? '')) === '') {
+            unset($payload['password']);
+        }
+        $client = new KeyHelpClient($this->config, $server);
+        $client->updateUser((string)$user['external_id'], $payload);
+        $this->applyTemporaryHostingPlan($client, (string)$user['external_id'], $data, (string)($user['username'] ?? ''));
+        $this->importUsers((int)$user['server_id']);
+        return t('message.user_updated', ['name' => ($user['username'] ?? t('common.unknown'))]);
+    }
+
+    public function createHostingPackage(array $data): string
+    {
+        $payload = $this->hostingPackagePayload($data);
+        $marker = $this->newHostingPackageMarker();
+        $payload = $this->withHostingPackageMarker($payload, $marker);
+        foreach ($this->selectedHostingPackageServers($data) as $server) {
+            $client = new KeyHelpClient($this->config, $server);
+            $externalId = $this->saveMarkedHostingPackageOnServer($client, $payload, $marker);
+            $this->repo->saveHostingPlan((int)$server['id'], ['id' => $externalId] + $payload + ['description' => (string)($data['description'] ?? '')]);
+        }
+        return t('message.hosting_created', ['name' => ($payload['name'] ?: t('common.unknown'))]);
+    }
+
+    public function updateHostingPackage(array $data): string
+    {
+        $localId = (int)($data['id'] ?? 0);
+        if ($localId <= 0) {
+            throw new RuntimeException('Hostingpaket nicht gefunden.');
+        }
+        $current = $this->repo->package($localId);
+        if (!$current) {
+            throw new RuntimeException('Hostingpaket nicht gefunden.');
+        }
+
+        $payload = $this->hostingPackagePayload($data);
+        $marker = $this->hostingPackageMarker($current, $localId);
+        $payload = $this->withHostingPackageMarker($payload, $marker);
+        $externalId = (string)($current['external_id'] ?? '');
+        $currentServerId = (int)($current['server_id'] ?? 0);
+        $targets = $this->selectedHostingPackageServers($data);
+        $targetIds = array_map(static fn(array $server): int => (int)$server['id'], $targets);
+
+        foreach ($targets as $server) {
+            $serverId = (int)$server['id'];
+            $client = new KeyHelpClient($this->config, $server);
+            $savedExternalId = $this->saveMarkedHostingPackageOnServer($client, $payload, $marker, $currentServerId === $serverId ? $externalId : '');
+            $this->repo->saveHostingPlan($serverId, ['id' => $savedExternalId] + $payload + ['description' => (string)($data['description'] ?? '')]);
+        }
+
+        $this->deleteMarkedHostingPackageFromUnselectedServers($marker, $targetIds, $currentServerId, $externalId);
+        if ($currentServerId <= 0 || !in_array($currentServerId, $targetIds, true)) {
+            $this->repo->deletePackage($localId);
+        }
+        return t('message.hosting_created', ['name' => ($payload['name'] ?: t('common.unknown'))]);
+    }
+    public function deleteUser(int $localUserId): string
+    {
+        $user = $this->repo->user($localUserId);
+        if (!$user) {
+            throw new RuntimeException(t('message.user_not_found'));
+        }
+        $server = $this->repo->server((int)$user['server_id']);
+        if (!$server) {
+            throw new RuntimeException(t('message.server_not_found'));
+        }
+        (new KeyHelpClient($this->config, $server))->deleteUser((string)$user['external_id']);
+        $this->repo->deleteUser($localUserId);
+        return t('message.user_deleted', ['name' => ($user['username'] ?? t('common.unknown'))]);
+    }
+
+    public function userLoginUrl(int $localUserId): string
+    {
+        $user = $this->repo->user($localUserId);
+        if (!$user) {
+            throw new RuntimeException(t('message.user_not_found'));
+        }
+        $server = $this->repo->server((int)$user['server_id']);
+        if (!$server) {
+            throw new RuntimeException(t('message.server_not_found'));
+        }
+        $response = (new KeyHelpClient($this->config, $server))->userLoginUrl((string)$user['external_id']);
+        $url = (string)($response['url'] ?? '');
+        if ($url === '') {
+            throw new RuntimeException(t('message.user_login_failed'));
+        }
+        return $url;
+    }
+
+    private function createUserPayload(array $data): array
+    {
+        $payload = [
+            'username' => trim((string)($data['username'] ?? '')),
+            'language' => (string)($data['language'] ?? 'de'),
+            'email' => trim((string)($data['email'] ?? '')),
+            'password' => (string)($data['password'] ?? ''),
+            'notes' => (string)($data['notes'] ?? ''),
+            'contact_data' => [
+                'first_name' => (string)($data['first_name'] ?? ''),
+                'last_name' => (string)($data['last_name'] ?? ''),
+                'company' => (string)($data['company'] ?? ''),
+                'telephone' => (string)($data['phone'] ?? ''),
+                'address' => (string)($data['address'] ?? ''),
+                'city' => (string)($data['city'] ?? ''),
+                'zip' => (string)($data['postcode'] ?? ''),
+                'state' => (string)($data['region'] ?? ''),
+                'country' => (string)($data['country'] ?? ''),
+                'client_id' => (string)($data['customer_number'] ?? ''),
+            ],
+            'is_suspended' => !empty($data['account_locked']),
+        ];
+        $hostingPlanId = (int)($data['hosting_plan_id'] ?? 0);
+        if ($hostingPlanId > 0) {
+            $payload['id_hosting_plan'] = $hostingPlanId;
+        }
+
+        foreach (['suspend_on' => 'lock_on', 'delete_on' => 'delete_on'] as $apiField => $formField) {
+            $value = trim((string)($data[$formField] ?? ''));
+            if ($value !== '') {
+                $payload[$apiField] = $value;
             }
         }
-        return $result;
+
+        return $payload;
+    }
+
+    private function phpOnlyPayload(array $data): array
+    {
+        return [
+        ];
+    }
+
+    private function createdUserId(array $response): string
+    {
+        foreach (['id', 'client_id', 'user_id'] as $key) {
+            if (isset($response[$key]) && trim((string)$response[$key]) !== '') {
+                return trim((string)$response[$key]);
+            }
+        }
+        foreach (['data', 'item', 'client', 'user'] as $key) {
+            if (isset($response[$key]) && is_array($response[$key])) {
+                $id = $this->createdUserId($response[$key]);
+                if ($id !== '') {
+                    return $id;
+                }
+            }
+        }
+        return '';
+    }
+
+    private function createdUserIdFromList(KeyHelpClient $client, string $username): string
+    {
+        $username = strtolower(trim($username));
+        if ($username === '') {
+            return '';
+        }
+        foreach ($this->normalizeList($client->listUsers()) as $user) {
+            if (!is_array($user) || strtolower((string)($user['username'] ?? '')) !== $username) {
+                continue;
+            }
+            return $this->repo->userExternalId($user);
+        }
+        return '';
+    }
+
+    private function resourceLimitsPayload(array $data): array
+    {
+        $limits = [];
+        foreach (['disk_space', 'traffic'] as $field) {
+            $limits[$field] = !empty($data[$field . '_unlimited'])
+                ? -1
+                : $this->byteLimit((string)($data[$field] ?? '0'), (string)($data[$field . '_unit'] ?? 'MiB'));
+        }
+
+        $map = [
+            'domains' => 'domains',
+            'subdomains' => 'subdomains',
+            'email_accounts' => 'email_accounts',
+            'email_addresses' => 'email_addresses',
+            'email_forwarders' => 'email_forwardings',
+            'databases' => 'databases',
+            'ftp_users' => 'ftp_users',
+            'scheduled_tasks' => 'scheduled_tasks',
+        ];
+        foreach ($map as $formField => $apiField) {
+            if (!$this->resourcePermissionAllows($formField, $data)) {
+                $limits[$apiField] = 0;
+                continue;
+            }
+            $value = (int)($data[$formField] ?? 0);
+            $limits[$apiField] = !empty($data[$formField . '_unlimited']) || $value < 0 ? -1 : $value;
+        }
+
+        return $limits;
+    }
+
+    private function resourcePermissionAllows(string $formField, array $data): bool
+    {
+        return match ($formField) {
+            'ftp_users' => !empty($data['permission_ftp']),
+            default => true,
+        };
+    }
+
+    private function byteLimit(string $value, string $unit): int
+    {
+        $number = max(0, (int)$value);
+        return match ($unit) {
+            'GiB' => $number * 1024 * 1024 * 1024,
+            default => $number * 1024 * 1024,
+        };
+    }
+
+    private function permissionsPayload(array $data): array
+    {
+        $map = [
+            'ftp' => 'ftp',
+            'php' => 'php',
+            'perl_cgi' => 'perl',
+            'ssh' => 'ssh',
+            'backup' => 'backup',
+            'file_manager' => 'file_manager',
+            'dns_editor' => 'dns_editor',
+            'domain_security' => 'domain_security',
+            'certificate_management' => 'certificate_management',
+            'database_remote_access' => 'database_remote_access',
+            'email_catch_all' => 'email_catchall',
+            'delete_main_domains' => 'delete_main_domain',
+            'panel_access' => 'panel_access',
+            'update_contact_data' => 'update_contact_data',
+            'applications' => 'applications',
+            'restricted_ssh' => 'ssh_jail',
+        ];
+
+        $permissions = [];
+        foreach ($map as $formField => $apiField) {
+            $permissions[$apiField] = !empty($data['permission_' . $formField]);
+        }
+
+        if (!empty($permissions['ssh_jail'])) {
+            $permissions['ssh'] = true;
+        }
+
+        return $permissions;
+    }
+
+
+    private function phpPayload(array $data): array
+    {
+        $payload = [
+            'memory_limit' => (string)($data['php_memory_limit'] ?? '128M'),
+            'max_execution_time' => (int)($data['php_max_execution_time'] ?? 60),
+            'post_max_size' => (string)($data['php_post_max_size'] ?? '72M'),
+            'upload_max_filesize' => (string)($data['php_upload_max_filesize'] ?? '64M'),
+            'open_basedir' => (string)($data['php_open_basedir'] ?? ''),
+            'disable_functions' => (string)($data['php_disable_functions'] ?? ''),
+            'env_variables' => (string)($data['php_environment_variables'] ?? ''),
+            'extra_directives_immutable' => (string)($data['php_extra_directives_immutable'] ?? ''),
+            'extra_directives_mutable' => (string)($data['php_extra_directives_mutable'] ?? ''),
+        ];
+        $sendmailFrom = trim((string)($data['php_sendmail_from'] ?? ''));
+        if ($sendmailFrom !== '') {
+            $payload['sendmail_from'] = $sendmailFrom;
+        }
+        return $payload;
+    }
+
+    private function phpFpmPayload(array $data): array
+    {
+        return [
+            'pm' => (string)($data['php_fpm_pm'] ?? 'ondemand'),
+            'max_children' => max(1, (int)($data['php_fpm_max_children'] ?? 3)),
+            'max_requests' => max(0, (int)($data['php_fpm_max_requests'] ?? 0)),
+            'status' => !empty($data['php_fpm_status_enabled']),
+            'status_ip_restriction' => trim((string)($data['php_fpm_status_ips'] ?? '')) ?: null,
+        ];
+    }
+
+    private function hostingPackagePayload(array $data): array
+    {
+        return [
+            'name' => trim((string)($data['name'] ?? '')),
+            'resources' => $this->resourceLimitsPayload($data),
+            'permissions' => $this->permissionsPayload($data),
+            'php' => $this->phpPayload($data),
+            'php_fpm' => $this->phpFpmPayload($data),
+        ];
+    }
+    private function temporaryHostingPlanPayload(array $data, string $username): array
+    {
+        $safeUser = preg_replace('/[^a-zA-Z0-9_-]+/', '_', $username) ?: 'user';
+        return [
+            'name' => sprintf('khmsm_tmp_%s_%s_%s', $safeUser, gmdate('YmdHis'), bin2hex(random_bytes(3))),
+            'resources' => $this->resourceLimitsPayload($data),
+            'permissions' => $this->permissionsPayload($data),
+            'php' => $this->phpPayload($data),
+            'php_fpm' => $this->phpFpmPayload($data),
+        ];
+    }
+
+    private function applyTemporaryHostingPlan(KeyHelpClient $client, string|int $externalUserId, array $data, string $username): void
+    {
+        if ((int)($data['hosting_plan_id'] ?? 0) > 0) {
+            return;
+        }
+
+        $planPayload = $this->temporaryHostingPlanPayload($data, $username);
+        $planResponse = $client->createHostingPackage($planPayload);
+        $planId = $this->createdHostingPlanId($planResponse);
+        if ($planId === '') {
+            $planId = $this->createdHostingPlanIdFromList($client, (string)$planPayload['name']);
+        }
+        if ($planId === '') {
+            throw new RuntimeException('Das temporaere Hostingpaket wurde angelegt, aber die KeyHelp-Paket-ID konnte nicht ermittelt werden.');
+        }
+
+        $assignmentPayload = $this->createUserPayload($data);
+        $assignmentPayload['username'] = $username;
+        $assignmentPayload['id_hosting_plan'] = (int)$planId;
+        if (trim((string)($data['password'] ?? '')) === '') {
+            unset($assignmentPayload['password']);
+        }
+
+        try {
+            $client->updateUser($externalUserId, $assignmentPayload);
+        } catch (Throwable $e) {
+            $this->deleteTemporaryHostingPlan($client, $planId);
+            throw $e;
+        }
+
+        $this->deleteTemporaryHostingPlan($client, $planId);
+    }
+
+    private function deleteTemporaryHostingPlan(KeyHelpClient $client, string|int $planId): void
+    {
+        try {
+            $client->deleteHostingPackage($planId);
+        } catch (Throwable $e) {
+            if (function_exists('log_exception')) {
+                log_exception($this->config, $e, 'Temporaeres Hostingpaket konnte nicht geloescht werden.', ['hosting_plan_id' => $planId]);
+            }
+        }
+    }
+
+    private function createdHostingPlanId(array $response): string
+    {
+        foreach (['id', 'hosting_plan_id', 'plan_id'] as $key) {
+            if (isset($response[$key]) && trim((string)$response[$key]) !== '') {
+                return trim((string)$response[$key]);
+            }
+        }
+        foreach (['data', 'item', 'hosting_plan', 'plan'] as $key) {
+            if (isset($response[$key]) && is_array($response[$key])) {
+                $id = $this->createdHostingPlanId($response[$key]);
+                if ($id !== '') {
+                    return $id;
+                }
+            }
+        }
+        return '';
+    }
+
+    private function createdHostingPlanIdFromList(KeyHelpClient $client, string $name): string
+    {
+        foreach ($this->normalizeList($client->listHostingPlans()) as $plan) {
+            if (!is_array($plan) || (string)($plan['name'] ?? '') !== $name) {
+                continue;
+            }
+            return trim((string)($plan['id'] ?? $plan['external_id'] ?? ''));
+        }
+        return '';
+    }
+
+    private function saveMarkedHostingPackageOnServer(KeyHelpClient $client, array $payload, string $marker, string $fallbackExternalId = ''): string
+    {
+        $externalId = $this->hostingPlanIdByMarker($client, $marker);
+        if ($externalId !== '') {
+            $client->updateHostingPackage($externalId, $payload);
+            return $externalId;
+        }
+
+        if ($fallbackExternalId !== '' && $this->hostingPlanIdExists($client, $fallbackExternalId)) {
+            $client->updateHostingPackage($fallbackExternalId, $payload);
+            return $fallbackExternalId;
+        }
+
+        $response = $client->createHostingPackage($payload);
+        $externalId = $this->createdHostingPlanId($response);
+        if ($externalId === '') {
+            $externalId = $this->createdHostingPlanIdFromList($client, (string)$payload['name']);
+        }
+        if ($externalId === '') {
+            throw new RuntimeException('Das Hostingpaket wurde angelegt, aber die KeyHelp-Paket-ID konnte nicht ermittelt werden.');
+        }
+        return $externalId;
+    }
+
+    private function deleteMarkedHostingPackageFromUnselectedServers(string $marker, array $selectedServerIds, int $currentServerId = 0, string $currentExternalId = ''): void
+    {
+        $selectedServerIds = array_map('intval', $selectedServerIds);
+        foreach ($this->repo->servers(true) as $server) {
+            $serverId = (int)$server['id'];
+            if (in_array($serverId, $selectedServerIds, true)) {
+                continue;
+            }
+            $client = new KeyHelpClient($this->config, $server);
+            $externalId = $this->hostingPlanIdByMarker($client, $marker);
+            if ($externalId === '' && $serverId === $currentServerId && $currentExternalId !== '') {
+                $externalId = $currentExternalId;
+            }
+            if ($externalId !== '') {
+                $client->deleteHostingPackage($externalId);
+            }
+        }
+
+        foreach ($this->repo->packages() as $package) {
+            $serverId = (int)($package['server_id'] ?? 0);
+            if ($serverId <= 0 || in_array($serverId, $selectedServerIds, true)) {
+                continue;
+            }
+            if ($this->hostingPackageMarker($package, (int)$package['id']) === $marker) {
+                $this->repo->deletePackage((int)$package['id']);
+            }
+        }
+    }
+
+    private function selectedHostingPackageServers(array $data): array
+    {
+        $selected = $data['server_ids'] ?? [];
+        if (!is_array($selected)) {
+            $selected = [$selected];
+        }
+        $selected = array_values(array_filter(array_map('strval', $selected), static fn(string $value): bool => $value !== ''));
+        if ($selected === [] && (string)($data['server_id'] ?? '') !== '') {
+            $selected = [(string)$data['server_id']];
+        }
+        if ($selected === [] && !empty($data['server_selection_present'])) {
+            throw new RuntimeException('Bitte mindestens einen Server auswaehlen.');
+        }
+        if ($selected === [] || in_array('__all', $selected, true)) {
+            return $this->targetServers(null);
+        }
+        $ids = array_map('intval', $selected);
+        return array_values(array_filter($this->targetServers(null), static fn(array $server): bool => in_array((int)$server['id'], $ids, true)));
+    }
+
+    private function hostingPlanIdByMarker(KeyHelpClient $client, string $marker): string
+    {
+        foreach ($this->normalizeList($client->listHostingPlans()) as $plan) {
+            if (!is_array($plan) || $this->extractHostingPackageMarker((string)($plan['name'] ?? '')) !== $marker) {
+                continue;
+            }
+            return trim((string)($plan['id'] ?? $plan['external_id'] ?? ''));
+        }
+        return '';
+    }
+
+    private function hostingPlanIdExists(KeyHelpClient $client, string $externalId): bool
+    {
+        foreach ($this->normalizeList($client->listHostingPlans()) as $plan) {
+            if (!is_array($plan)) {
+                continue;
+            }
+            if (trim((string)($plan['id'] ?? $plan['external_id'] ?? '')) === $externalId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function hostingPackageMarker(array $package, int $localId): string
+    {
+        $marker = $this->extractHostingPackageMarker((string)($package['name'] ?? ''));
+        if ($marker !== '') {
+            return $marker;
+        }
+        $limits = json_decode((string)($package['limits_json'] ?? ''), true);
+        if (is_array($limits)) {
+            $marker = $this->extractHostingPackageMarker((string)($limits['name'] ?? ''));
+            if ($marker !== '') {
+                return $marker;
+            }
+        }
+        return 'pkg-' . max(1, $localId);
+    }
+
+    private function newHostingPackageMarker(): string
+    {
+        return 'pkg-' . bin2hex(random_bytes(6));
+    }
+
+    private function withHostingPackageMarker(array $payload, string $marker): array
+    {
+        $name = $this->removeHostingPackageMarker(trim((string)($payload['name'] ?? '')));
+        $payload['name'] = trim($name . ' [MSM:' . $marker . ']');
+        return $payload;
+    }
+
+    private function extractHostingPackageMarker(string $name): string
+    {
+        if (preg_match('/\[MSM:([a-zA-Z0-9_-]+)\]/', $name, $matches) === 1) {
+            return $matches[1];
+        }
+        return '';
+    }
+
+    private function removeHostingPackageMarker(string $name): string
+    {
+        return trim((string)preg_replace('/\s*\[MSM:[a-zA-Z0-9_-]+\]\s*/', ' ', $name));
     }
 
     public function importDomains(): string
@@ -161,6 +752,7 @@ final class SyncService
 
     public function runQueue(): string
     {
+        // Legacy/reserve path: UI-triggered queued sync is currently disabled because changes are applied immediately.
         $runId = $this->repo->createSyncRun('running');
         $done = 0;
         try {
@@ -172,6 +764,7 @@ final class SyncService
                     $result = match ($action['type']) {
                         'create_user' => $client->createUser($payload),
                         'create_hosting_package' => $client->createHostingPackage($payload),
+                        'update_hosting_package' => $client->updateHostingPackage((string)($payload['id'] ?? ''), is_array($payload['payload'] ?? null) ? $payload['payload'] : []),
                         default => throw new RuntimeException('Unknown action: ' . $action['type']),
                     };
                 }

@@ -46,9 +46,30 @@ final class Database
         foreach (array_filter(array_map('trim', explode(';', $schema))) as $statement) {
             $pdo->exec($statement);
         }
+        self::addColumnIfMissing($pdo, 'servers', 'ssh_link_enabled', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER api_token');
+        self::addColumnIfMissing($pdo, 'servers', 'ssh_port', 'INT UNSIGNED NOT NULL DEFAULT 22 AFTER ssh_link_enabled');
+        self::addColumnIfMissing($pdo, 'servers', 'ssh_username', 'VARCHAR(190) NULL AFTER ssh_port');
         self::addColumnIfMissing($pdo, 'domains', 'domain_status', 'INT NULL');
         self::addColumnIfMissing($pdo, 'domains', 'is_disabled', 'TINYINT(1) NOT NULL DEFAULT 0');
+        self::addColumnIfMissing($pdo, 'domains', 'suspend_on', 'DATE NULL');
         self::addColumnIfMissing($pdo, 'domains', 'delete_on', 'DATE NULL');
+        self::addColumnIfMissing($pdo, 'domains', 'billing_frequency', "ENUM('monthly', 'bimonthly', 'quarterly', 'halfyearly', 'yearly') NOT NULL DEFAULT 'yearly' AFTER next_billing_at");
+        self::addColumnIfMissing($pdo, 'domains', 'last_change_at', 'DATE NULL');
+        self::addColumnIfMissing($pdo, 'domains', 'domain_owner_contact', 'TEXT NULL AFTER registrar');
+        self::addColumnIfMissing($pdo, 'domains', 'domain_admin_c', 'TEXT NULL AFTER domain_owner_contact');
+        self::addColumnIfMissing($pdo, 'domains', 'domain_tech_c', 'TEXT NULL AFTER domain_admin_c');
+        self::addColumnIfMissing($pdo, 'domains', 'domain_zone_c', 'TEXT NULL AFTER domain_tech_c');
+        self::addColumnIfMissing($pdo, 'billing_tax_rates', 'active', 'TINYINT(1) NOT NULL DEFAULT 1');
+        self::addColumnIfMissing($pdo, 'billing_tld_prices', 'active', 'TINYINT(1) NOT NULL DEFAULT 1');
+        self::addColumnIfMissing($pdo, 'billing_user_items', 'description_text', 'TEXT NULL AFTER description');
+        self::addColumnIfMissing($pdo, 'billing_user_items', 'next_billing_at', 'DATE NULL AFTER last_billed_at');
+        self::addColumnIfMissing($pdo, 'billing_user_settings', 'last_invoice_at', 'DATE NULL AFTER invoice_frequency');
+        self::addColumnIfMissing($pdo, 'billing_user_settings', 'next_invoice_at', 'DATE NULL AFTER last_invoice_at');
+        self::addColumnIfMissing($pdo, 'invoices', 'recipient_snapshot', 'JSON NULL AFTER pdf_path');
+        self::addColumnIfMissing($pdo, 'invoices', 'sender_snapshot', 'TEXT NULL AFTER recipient_snapshot');
+        self::addColumnIfMissing($pdo, 'invoices', 'send_error', 'TEXT NULL AFTER sender_snapshot');
+        self::addColumnIfMissing($pdo, 'invoice_items', 'billing_reference', 'VARCHAR(190) NOT NULL AFTER service_date');
+        self::addIndexIfMissing($pdo, 'invoice_items', 'uniq_invoice_item_reference', 'UNIQUE KEY `uniq_invoice_item_reference` (`billing_reference`)');
         self::addColumnIfMissing($pdo, 'hosting_packages', 'external_id', 'VARCHAR(190) NULL AFTER id');
         self::addColumnIfMissing($pdo, 'hosting_packages', 'synced_at', 'DATETIME NULL AFTER server_id');
         self::dropIndexIfExists($pdo, 'hosting_packages', 'name');

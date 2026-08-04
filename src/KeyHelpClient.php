@@ -5,10 +5,13 @@ final class KeyHelpClient
         'users' => '/api/v2/clients',
         'clients' => '/api/v2/clients',
         'domains' => '/api/v2/domains',
+        'login' => '/api/v2/login/{id}',
         'domain_detail' => '/api/v2/domains/{id}',
         'client_detail' => '/api/v2/clients/{id}',
         'hosting_plans' => '/api/v2/hosting-plans',
+        'hosting_plan_detail' => '/api/v2/hosting-plans/{id}',
         'server' => '/api/v2/server',
+        'server_reboot' => '/api/v2/server/reboot',
     ];
 
     public function __construct(private array $config, private array $server) {}
@@ -16,6 +19,10 @@ final class KeyHelpClient
     public function serverInfo(): array
     {
         return $this->request('GET', $this->endpoint('server'), null, 'Serverstatus und Systeminformationen des KeyHelp-Servers abrufen.');
+    }
+    public function rebootServer(): array
+    {
+        return $this->request('POST', $this->endpoint('server_reboot'), ['confirm' => true], 'Server per KeyHelp-API neu starten.');
     }
 
     public function listDomains(): array
@@ -43,6 +50,21 @@ final class KeyHelpClient
         return $this->request('POST', $this->endpoint('clients'), $payload, 'KeyHelp-Client auf dem Zielserver anlegen.');
     }
 
+    public function updateUser(string|int $id, array $payload): array
+    {
+        return $this->request('PUT', $this->endpoint('client_detail', ['id' => (string)$id]), $payload, 'KeyHelp-Client auf dem Zielserver aktualisieren.');
+    }
+
+    public function deleteUser(string|int $id): array
+    {
+        return $this->request('DELETE', $this->endpoint('client_detail', ['id' => (string)$id]), null, 'KeyHelp-Client auf dem Zielserver loeschen.');
+    }
+
+    public function userLoginUrl(string|int $id): array
+    {
+        return $this->request('GET', $this->endpoint('login', ['id' => (string)$id]), null, 'KeyHelp-Quicklogin fuer Client erzeugen.');
+    }
+
     public function listHostingPlans(): array
     {
         return $this->request('GET', $this->endpoint('hosting_plans'), null, 'Hostingplaene des KeyHelp-Servers abrufen.');
@@ -50,7 +72,17 @@ final class KeyHelpClient
 
     public function createHostingPackage(array $payload): array
     {
-        return $this->request('POST', $this->endpoint('hosting_plans'), $payload, 'Hostingpaket auf den Zielserver übertragen.');
+        return $this->request('POST', $this->endpoint('hosting_plans'), $payload, 'Hostingpaket auf den Zielserver uebertragen.');
+    }
+
+    public function updateHostingPackage(string|int $id, array $payload): array
+    {
+        return $this->request('PUT', $this->endpoint('hosting_plan_detail', ['id' => (string)$id]), $payload, 'Hostingpaket auf dem Zielserver aktualisieren.');
+    }
+
+    public function deleteHostingPackage(string|int $id): array
+    {
+        return $this->request('DELETE', $this->endpoint('hosting_plan_detail', ['id' => (string)$id]), null, 'Hostingpaket auf dem Zielserver loeschen.');
     }
 
     private function endpoint(string $key, array $params = []): string

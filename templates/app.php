@@ -1,28 +1,264 @@
-<?php $initialTheme = ($themeMode ?? 'auto') === 'dark' ? 'dark' : 'light'; ?>
+﻿<?php
+$initialTheme = ($themeMode ?? 'auto') === 'dark' ? 'dark' : 'light';
+$billingTaxRates = $billingData['taxRates'] ?? [];
+$billingUserSettings = $billingData['userSettings'] ?? [];
+$billingUserItems = $billingData['userItemsByUserId'] ?? [];
+$billingDomainOverrides = $billingData['domainOverrides'] ?? [];
+$resourceFields = [
+    ['disk_space', 'users.resource_disk_space', true, 'GiB', 2, null],
+    ['traffic', 'users.resource_traffic', true, 'MiB', 0, null],
+    ['domains', 'users.resource_domains', false, '', 1, null],
+    ['subdomains', 'users.resource_subdomains', false, '', 0, null],
+    ['email_accounts', 'users.resource_email_accounts', false, '', 1, null],
+    ['email_addresses', 'users.resource_email_addresses', false, '', 2, null],
+    ['email_forwarders', 'users.resource_email_forwarders', false, '', 0, null],
+    ['databases', 'users.resource_databases', false, '', 0, null],
+    ['ftp_users', 'users.resource_ftp_users', false, '', 0, 'ftp'],
+    ['scheduled_tasks', 'users.resource_scheduled_tasks', false, '', 0, null],
+];
+$permissionFields = [
+    ['ftp', true],
+    ['php', true],
+    ['perl_cgi', false],
+    ['ssh', false],
+    ['backup', true],
+    ['file_manager', true],
+    ['dns_editor', false],
+    ['domain_security', false],
+    ['certificate_management', false],
+    ['database_remote_access', false],
+    ['email_catch_all', true],
+    ['delete_main_domains', false],
+    ['panel_access', true],
+    ['update_contact_data', false],
+    ['applications', true],
+    ['restricted_ssh', false],
+];
+$defaultDisabledFunctions = implode(', ', [
+    'apache_child_terminate',
+    'apache_note',
+    'apache_setenv',
+    'curl_multi_exec',
+    'define_syslog_variables',
+    'dl',
+    'exec',
+    'link',
+    'opcache_get_status',
+    'openlog',
+    'passthru',
+    'pcntl_exec',
+    'pcntl_fork',
+    'pcntl_setpriority',
+    'popen',
+    'posix_getpwuid',
+    'posix_kill',
+    'posix_mkfifo',
+    'posix_setpgid',
+    'posix_setsid',
+    'posix_setuid',
+    'proc_close',
+    'proc_get_status',
+    'proc_nice',
+    'proc_open',
+    'proc_terminate',
+    'shell_exec',
+    'stream_socket_sendto',
+    'symlink',
+    'syslog',
+    'system',
+]);
+$labelHelp = static function (string $label, string $helpKey): string {
+    $help = t($helpKey);
+    if ($help === $helpKey || trim($help) === '') {
+        return h($label);
+    }
+    return h($label)
+        . ' <button type="button" class="help-popover"'
+        . ' data-help-popover data-bs-toggle="popover"'
+        . ' data-bs-trigger="focus" data-bs-placement="top"'
+        . ' data-bs-content="' . h($help) . '"'
+        . ' aria-label="' . h($help) . '">?</button>';
+};
+$renderResourceFields = static function (array $fields, bool $readonly = false) use ($labelHelp): void {
+    foreach ($fields as [$field, $labelKey, $hasUnit, $unit, $default, $requiresPermission]) {
+        $readonlyAttrs = $readonly ? ' data-api-readonly' : '';
+        $controlReadonly = $readonly ? ' data-api-readonly-control' : '';
+        $requiresAttrs = $requiresPermission ? ' data-resource-requires-permission="' . h($requiresPermission) . '"' : '';
+        echo '<div class="resource-row" data-resource-row' . $requiresAttrs . $readonlyAttrs . '>';
+        echo '<label class="form-label">' . $labelHelp(t($labelKey), $labelKey . '_help');
+        echo '<div class="resource-input-group">';
+        if ($hasUnit) {
+            echo '<select class="form-select"'
+                . ' name="' . h($field) . '_unit"'
+                . ' data-resource-unit="' . h($field) . '"'
+                . ' data-resource-control' . $controlReadonly . '>'
+                . '<option value="MiB"' . ($unit === 'MiB' ? ' selected' : '') . '>MiB</option>'
+                . '<option value="GiB"' . ($unit === 'GiB' ? ' selected' : '') . '>GiB</option>'
+                . '</select>';
+        }
+        echo '<input class="form-control"'
+            . ' name="' . h($field) . '"'
+            . ' type="number" min="0"'
+            . ' value="' . h((string)$default) . '"'
+            . ' data-resource-field="' . h($field) . '"'
+            . ' data-resource-control' . $controlReadonly . '>';
+        echo '</div></label>';
+        echo '<label class="form-check billing-check">'
+            . '<input class="form-check-input"'
+            . ' type="checkbox"'
+            . ' name="' . h($field) . '_unlimited"'
+            . ' value="1"'
+            . ' data-resource-unlimited="' . h($field) . '"'
+            . ' data-resource-control' . $controlReadonly . '> '
+            . h(t('users.unlimited'))
+            . '</label>';
+        echo '</div>';
+    }
+};
+$renderPermissionFields = static function (array $fields, bool $readonly = false) use ($labelHelp): void {
+    echo '<div class="permission-grid"' . ($readonly ? ' data-api-readonly' : '') . '>';
+    foreach ($fields as [$field, $checked]) {
+        echo '<label class="form-check">'
+            . '<input class="form-check-input"'
+            . ' type="checkbox"'
+            . ' name="permission_' . h($field) . '"'
+            . ' value="1" '
+            . ($checked ? 'checked' : '')
+            . ($readonly ? ' data-api-readonly-control' : '')
+            . '> '
+            . $labelHelp(t('users.permission_' . $field), 'users.permission_' . $field . '_help')
+            . '</label>';
+    }
+    echo '</div>';
+};
+$renderPhpFields = static function (bool $readonly = false) use ($labelHelp, $defaultDisabledFunctions): void {
+    $readonlyAttr = $readonly ? ' data-api-readonly-control' : '';
+    $fields = [
+        ['php_memory_limit', 'memory_limit', '128M', 'input'],
+        ['php_max_execution_time', 'max_execution_time', '60', 'input'],
+        ['php_post_max_size', 'post_max_size', '72M', 'input'],
+        ['php_upload_max_filesize', 'upload_max_filesize', '64M', 'input'],
+        ['php_open_basedir', 'open_basedir', '##DOCROOT##/www:##DOCROOT##/files:##DOCROOT##/tmp', 'input'],
+        ['php_disable_functions', 'disable_functions', $defaultDisabledFunctions, 'textarea'],
+        ['php_sendmail_from', 'sendmail_from', '', 'input'],
+        ['php_environment_variables', 'users.php_environment_variables', '', 'textarea'],
+        ['php_extra_directives_immutable', 'users.php_extra_directives_immutable', '', 'textarea'],
+        ['php_extra_directives_mutable', 'users.php_extra_directives_mutable', '', 'textarea'],
+    ];
+    foreach ($fields as [$name, $labelKey, $value, $type]) {
+        echo '<label class="form-label">' . $labelHelp(t($labelKey), $labelKey . '_help');
+        if ($type === 'textarea') {
+            echo '<textarea class="form-control" name="' . h($name) . '" rows="3"' . $readonlyAttr . '>' . h($value) . '</textarea>';
+        } else {
+            echo '<input class="form-control" name="' . h($name) . '" value="' . h($value) . '"' . $readonlyAttr . '>';
+        }
+        echo '</label>';
+    }
+};
+$dashboardPackageMarkers = [];
+foreach ($packages as $package) {
+    $markerSource = (string)($package['name'] ?? '');
+    $limits = json_decode((string)($package['limits_json'] ?? ''), true);
+    if (is_array($limits)) {
+        $markerSource .= ' ' . (string)($limits['name'] ?? '');
+    }
+    if (preg_match('/\[MSM:(pkg-[^\]]+)\]/', $markerSource, $matches)) {
+        $dashboardPackageMarkers[$matches[1]] = true;
+    }
+}
+?>
 <!doctype html>
 <html lang="<?= h(current_locale()) ?>" data-theme-mode="<?= h($themeMode ?? 'auto') ?>" data-bs-theme="<?= h($initialTheme) ?>">
-
     <?php render_partial('head', ['config' => $config, 'title' => $config['app']['name']]); ?>
-
     <body class="app-shell" data-page="<?= h($page) ?>" data-server-refresh-interval="<?= (int)$serverRefreshInterval ?>">
         <aside class="sidebar bg-white border-end">
-            <a class="sidebar-brand app-logo-link" href="/" aria-label="<?= h($config['app']['name']) ?>"><img class="app-logo app-logo-sidebar" src="/assets/khmsm_fulllogo_512.png" alt="<?= h($config['app']['name']) ?>"></a>
+            <a class="sidebar-brand app-logo-link" href="/" aria-label="<?= h($config['app']['name']) ?>">
+                <img
+                    class="app-logo app-logo-sidebar"
+                    src="/assets/khmsm_fulllogo_512.png"
+                    alt="<?= h($config['app']['name']) ?>"
+                >
+            </a>
             <nav class="side-nav nav nav-pills flex-column" aria-label="<?= h(t('nav.dashboard')) ?>">
                 <?php foreach ($navItems as $navPage => $label): ?>
-                <a class="nav-link <?= $page === $navPage ? 'active' : '' ?>" href="/?page=<?= h($navPage) ?>">
-                    <?= h($label) ?>
-                </a>
+                    <a
+                        class="nav-link <?= $page === $navPage ? 'active' : '' ?>"
+                        href="/?page=<?= h($navPage) ?>"
+                    >
+                        <?= h($label) ?>
+                    </a>
                 <?php endforeach; ?>
             </nav>
         </aside>
         <div class="app-main">
             <header class="topbar navbar bg-white border-bottom sticky-top">
+                <button
+                    class="mobile-menu-toggle"
+                    type="button"
+                    data-bs-toggle="offcanvas"
+                    data-bs-target="#mobileNavigation"
+                    aria-controls="mobileNavigation"
+                    aria-label="<?= h(t('nav.dashboard')) ?>"
+                >
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+                <a class="mobile-logo app-logo-link" href="/" aria-label="<?= h($config['app']['name']) ?>">
+                    <img
+                        class="app-logo"
+                        src="/assets/khmsm_fulllogo_512.png"
+                        alt="<?= h($config['app']['name']) ?>"
+                    >
+                </a>
+                <div
+                    class="offcanvas offcanvas-start mobile-navigation"
+                    tabindex="-1"
+                    id="mobileNavigation"
+                >
+                    <div class="offcanvas-header">
+                        <img
+                            class="app-logo"
+                            src="/assets/khmsm_fulllogo_512.png"
+                            alt="<?= h($config['app']['name']) ?>"
+                        >
+                        <button
+                            type="button"
+                            class="btn-close"
+                            data-bs-dismiss="offcanvas"
+                            aria-label="Close"
+                        ></button>
+                    </div>
+                    <div class="offcanvas-body">
+                        <nav class="mobile-nav nav nav-pills flex-column" aria-label="<?= h(t('nav.dashboard')) ?>">
+                            <?php foreach ($navItems as $navPage => $label): ?>
+                                <a
+                                    class="nav-link <?= $page === $navPage ? 'active' : '' ?>"
+                                    href="/?page=<?= h($navPage) ?>"
+                                >
+                                    <?= h($label) ?>
+                                </a>
+                            <?php endforeach; ?>
+                        </nav>
+                        <div class="mobile-actions">
+                            <button class="btn btn-primary" disabled>
+                                <?= h(t('common.sync_start')) ?>
+                            </button>
+                            <a class="btn btn-outline-secondary" href="/?logout=1">
+                                <?= h(t('common.logout')) ?>
+                            </a>
+                        </div>
+                    </div>
+                </div>
                 <div>
-                    <h1 class="h4 mb-0"><?= h($navItems[$page]) ?></h1>
+                    <h1 class="h4 mb-0">
+                        <?= h($page === 'hosting' ? t('hosting.title') : $navItems[$page]) ?>
+                    </h1>
                 </div>
                 <div class="top-actions">
-                    <form method="post"><input type="hidden" name="_action" value="run_sync"><input type="hidden" name="_return" value="<?= h($returnPath) ?>"><button class="btn btn-primary"><?= h(t('common.sync_start')) ?></button></form>
-                    <a class="btn btn-outline-secondary" href="/?logout=1"><?= h(t('common.logout')) ?></a>
+                    <a class="btn btn-outline-secondary" href="/?logout=1">
+                        <?= h(t('common.logout')) ?>
+                    </a>
                 </div>
             </header>
             <main class="layout container-fluid">
@@ -36,194 +272,468 @@
                 <section class="metrics row g-3 mb-4">
                     <div class="col-12 col-sm-6 col-xl-3">
                         <div class="card metric-card">
-                            <div class="card-body"><strong><?= count($servers) ?></strong><span><?= h(t('dashboard.metric_servers')) ?></span></div>
+                            <div class="card-body">
+                                <strong><?= count($servers) ?></strong>
+                                <span><?= h(t('dashboard.metric_servers')) ?></span>
+                            </div>
                         </div>
                     </div>
                     <div class="col-12 col-sm-6 col-xl-3">
                         <div class="card metric-card">
-                            <div class="card-body"><strong><?= count($domains) ?></strong><span><?= h(t('dashboard.metric_domains')) ?></span></div>
+                            <div class="card-body">
+                                <strong><?= count($domains) ?></strong>
+                                <span><?= h(t('dashboard.metric_domains')) ?></span>
+                            </div>
                         </div>
                     </div>
                     <div class="col-12 col-sm-6 col-xl-3">
                         <div class="card metric-card">
-                            <div class="card-body"><strong><?= count($packages) ?></strong><span><?= h(t('dashboard.metric_packages')) ?></span></div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-sm-6 col-xl-3">
-                        <div class="card metric-card">
-                            <div class="card-body"><strong><?= count($actions) ?></strong><span><?= h(t('dashboard.metric_actions')) ?></span></div>
+                            <div class="card-body">
+                                <strong><?= count($dashboardPackageMarkers) ?></strong>
+                                <span><?= h(t('dashboard.metric_packages')) ?></span>
+                            </div>
                         </div>
                     </div>
                 </section>
                 <section class="dashboard-grid" data-dashboard-grid>
-                    <article class="card server-card server-card-skeleton" aria-label="<?= h(t('dashboard.server_loading')) ?>">
-                        <header><span class="skeleton-line wide"></span><span class="skeleton-circle"></span></header>
-                        <div class="skeleton-facts">
-                            <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-                        </div>
-                    </article>
+                    <?php $dashboardServers = array_values(array_filter($servers, static fn(array $server): bool => (int)($server['active'] ?? 0) === 1)); ?>
+                    <?php foreach ($dashboardServers as $server): ?>
+                        <?php $status = server_status_placeholder_view($server); ?>
+                        <article
+                            class="card server-card server-card-skeleton"
+                            data-server-id="<?= (int)$status['server_id'] ?>"
+                            aria-label="<?= h(t('dashboard.server_loading')) ?>"
+                        >
+                            <header>
+                                <h2>
+                                    <?php if ($status['dashboard_url'] !== ''): ?>
+                                        <a
+                                            class="server-status-hostname server-dashboard-link"
+                                            href="<?= h($status['dashboard_url']) ?>"
+                                            target="<?= h($status['hostname']) ?>"
+                                        >
+                                            <?= h($status['hostname']) ?>
+                                        </a>
+                                    <?php else: ?>
+                                        <span class="server-status-hostname">
+                                            <?= h($status['hostname']) ?>
+                                        </span>
+                                    <?php endif; ?>
+                                    <?= server_ssh_link_html($server) ?>
+                                </h2>
+
+                                <div class="server-card-actions">
+                                    <button
+                                        type="button"
+                                        class="server-status-time"
+                                        data-bs-toggle="tooltip"
+                                        data-bs-placement="top"
+                                        data-bs-trigger="hover"
+                                        data-bs-title="<?= h(t('dashboard.last_refresh_unknown')) ?>"
+                                        aria-label="<?= h(t('dashboard.last_refresh_unknown')) ?>"
+                                    >
+                                        <?= icon_svg('clock') ?>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="server-status-refresh"
+                                        <?= icon_button_attrs(t('domains.refresh')) ?>
+                                    >
+                                        <?= icon_svg('refresh') ?>
+                                        <span class="refresh-countdown" data-refresh-countdown></span>
+                                    </button>
+                                </div>
+                            </header>
+
+                            <p class="server-status-error error-text" hidden></p>
+                            <p class="reboot-text" hidden>
+                                <?= h(t('dashboard.reboot_required')) ?>
+                                <button
+                                    type="button"
+                                    class="server-reboot-button icon-only status-tooltip"
+                                    data-server-id="<?= (int)$status['server_id'] ?>"
+                                    <?= icon_button_attrs(t('dashboard.reboot_server')) ?>
+                                >
+                                    <?= icon_svg('reboot') ?>
+                                </button>
+                            </p>
+
+                            <dl class="server-facts">
+                                <?php foreach ([
+                                    ['os', 'OS'],
+                                    ['kernel', 'Kernel'],
+                                    ['panel', 'Control Panel'],
+                                    ['cpu', 'CPU'],
+                                    ['uptime', 'Uptime'],
+                                    ['traffic', 'Traffic this month'],
+                                    ['disk', 'Consumed disk space'],
+                                ] as [$field, $label]): ?>
+                                    <div>
+                                        <dt><?= h($label) ?>:</dt>
+                                        <dd class="is-placeholder" data-status-field="<?= h($field) ?>">
+                                            <span class="skeleton-line"></span>
+                                        </dd>
+                                    </div>
+                                <?php endforeach; ?>
+                            </dl>
+                        </article>
+                    <?php endforeach; ?>
+
+                    <?php if (!$dashboardServers): ?>
+                        <p class="empty"><?= h(t('js.no_active_servers')) ?></p>
+                    <?php endif; ?>
+                </section>
+                <?php elseif ($page === 'domains'): ?>
+                <section class="page-section card">
+                    <div class="card-body" data-domain-import-area>
+                        <?php render_partial('domains_content', compact('domains', 'returnPath', 'billingDomainOverrides', 'billingTaxRates')); ?>
+                    </div>
                 </section>
 
-                <?php elseif ($page === 'domains'): ?>
+                <?php elseif ($page === 'users'): ?>
+                <section class="page-section card">
+                    <div class="card-body" data-user-import-area>
+                        <?php render_partial('users_content', compact(
+                            'userGroups',
+                            'returnPath',
+                            'billingUserSettings',
+                            'billingUserItems'
+                        )); ?>
+                    </div>
+                </section>
+                <?php include __DIR__ . '/app_user_modal.php'; ?>
+
+                <?php elseif ($page === 'hosting'): ?>
+                <?php
+                $packageMarker = static function (array $package): string {
+                    $name = (string)($package['name'] ?? '');
+                    if (preg_match('/\[MSM:(pkg-[^\]]+)\]/', $name, $matches)) { return $matches[1]; }
+                    $limits = json_decode((string)($package['limits_json'] ?? ''), true);
+                    if (is_array($limits) && preg_match('/\[MSM:(pkg-[^\]]+)\]/', (string)($limits['name'] ?? ''), $matches)) { return $matches[1]; }
+                    return 'external-' . (string)($package['id'] ?? '0');
+                };
+                $packageRows = [];
+                $packageServerIdsByMarker = [];
+                $packageServerNamesByMarker = [];
+                foreach ($packages as $packageForMarker) {
+                    $marker = $packageMarker($packageForMarker);
+                    $serverId = (int)($packageForMarker['server_id'] ?? 0);
+                    if (!isset($packageRows[$marker])) {
+                        $packageRows[$marker] = $packageForMarker;
+                    }
+                    if ($serverId > 0) {
+                        $packageServerIdsByMarker[$marker][$serverId] = $serverId;
+                        $packageServerNamesByMarker[$marker][$serverId] = (string)($packageForMarker['server_name'] ?? '');
+                    }
+                }
+                ?>
                 <section class="page-section card">
                     <div class="card-body">
                         <div class="section-head">
-                            <h2 class="h5 mb-0"><?= h(t('domains.title')) ?></h2>
-                            <form method="post"><input type="hidden" name="_action" value="import_domains"><input type="hidden" name="_return" value="<?= h($returnPath) ?>"><button class="btn btn-primary"><?= h(t('domains.import')) ?></button></form>
+                            <h2 class="h5 mb-0"><?= h(t('hosting.title')) ?></h2>
+                            <div class="table-actions">
+                                <form method="post" class="d-inline">
+                                    <input type="hidden" name="_action" value="import_hosting_plans">
+                                    <input type="hidden" name="_return" value="<?= h($returnPath) ?>">
+                                    <button
+                                        class="btn btn-primary btn-sm icon-only status-tooltip"
+                                        type="submit"
+                                        <?= icon_button_attrs(t('hosting.import')) ?>
+                                    >
+                                        <?= icon_svg('refresh') ?>
+                                    </button>
+                                </form>
+                                <button
+                                    type="button"
+                                    class="btn btn-primary btn-sm icon-only status-tooltip hosting-package-create"
+                                    <?= icon_button_attrs(t('hosting.create_action')) ?>
+                                >
+                                    <?= icon_svg('plus') ?>
+                                </button>
+                            </div>
                         </div>
+
                         <div class="table-responsive mt-3">
                             <table class="table table-hover align-middle">
                                 <thead>
                                     <tr>
-                                        <th><?= h(t('domains.domain')) ?></th>
+                                        <th><?= h(t('hosting.name')) ?></th>
                                         <th><?= h(t('domains.server')) ?></th>
-                                        <th><?= h(t('domains.owner')) ?></th>
-                                        <th><?= h(t('domains.registered')) ?></th>
-                                        <th><?= h(t('domains.next_billing')) ?></th>
-                                        <th><?= h(t('domains.registrar')) ?></th>
-                                        <th><?= h(t('domains.deletion')) ?></th>
-                                        <th><?= h(t('domains.subdomains')) ?></th>
-                                        <th></th>
+                                        <th class="text-end"><?= h(t('common.actions')) ?></th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php foreach ($domains as $domain): ?>
-                                    <tr class="domain-row <?= h(domain_row_class($domain)) ?>" data-domain-id="<?= (int)$domain['id'] ?>" data-domain-name="<?= h($domain['domain']) ?>">
-                                        <td><?= h($domain['domain']) ?></td>
-                                        <td><?= h($domain['server_name']) ?></td>
-                                        <td><?= h($domain['owner_name'] ?: ($domain['owner_external_id'] ? 'User #' . $domain['owner_external_id'] : '')) ?></td>
-                                        <td><?php if ($domain['registered_at']): ?><span class="readonly-value" data-field="registered_at"><?= h(format_date_local($domain['registered_at'])) ?></span><?php else: ?><input class="form-control" type="date" name="registered_at" value=""><?php endif; ?></td>
-                                        <td><?php if ($domain['next_billing_at']): ?><span class="readonly-value" data-field="next_billing_at"><?= h(format_date_local($domain['next_billing_at'])) ?></span><?php else: ?><input class="form-control" type="date" name="next_billing_at" value=""><?php endif; ?></td>
-                                        <td><input class="form-control" name="registrar" value="<?= h($domain['registrar']) ?>"></td>
-                                        <td class="domain-status-cell"><?= domain_status_html($domain) ?></td>
-                                        <td><button type="button" class="btn btn-outline-secondary btn-sm subdomain-toggle" data-server-id="<?= (int)$domain['server_id'] ?>" data-domain="<?= h($domain['domain']) ?>"><?= h(t('common.show')) ?></button></td>
-                                        <td>
-                                            <div class="domain-actions"><button type="button" class="btn btn-outline-secondary icon-button domain-refresh" title="<?= h(t('domains.refresh')) ?>" aria-label="<?= h(t('domains.refresh')) ?>"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-clockwise" viewBox="0 0 16 16" aria-hidden="true">
-                                                        <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z" />
-                                                        <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466" />
-                                                    </svg></button><button type="button" class="btn btn-primary btn-sm domain-save"><?= h(t('common.save')) ?></button></div>
-                                        </td>
-                                    </tr>
-                                    <tr class="subdomain-row" id="subdomains-<?= (int)$domain['id'] ?>" hidden>
-                                        <td colspan="9">
-                                            <div class="subdomain-box"><?= h(t('common.loading')) ?></div>
-                                        </td>
-                                    </tr>
+                                    <?php foreach ($packageRows as $marker => $package): ?>
+                                        <?php
+                                        $packageSelectedServerIds = array_values($packageServerIdsByMarker[$marker] ?? []);
+                                        $packageServerNames = array_values(array_filter($packageServerNamesByMarker[$marker] ?? []));
+                                        $packageDescription = trim((string)($package['description'] ?? ''));
+                                        ?>
+                                        <tr>
+                                            <td><?= h($package['name']) ?></td>
+                                            <td><?= h($packageServerNames ? implode(', ', $packageServerNames) : t('common.system_wide')) ?></td>
+                                            <td class="text-end">
+                                                <div class="table-actions">
+                                                    <button
+                                                        type="button"
+                                                        class="btn btn-outline-secondary btn-sm icon-only status-tooltip hosting-package-edit"
+                                                        <?= icon_button_attrs(t('common.edit')) ?>
+                                                        data-package-id="<?= (int)$package['id'] ?>"
+                                                        data-package-name="<?= h($package['name']) ?>"
+                                                        data-package-description="<?= h($packageDescription) ?>"
+                                                        data-package-server-id="<?= h((string)($package['server_id'] ?? '')) ?>"
+                                                        data-package-server-ids="<?= h(implode(',', $packageSelectedServerIds)) ?>"
+                                                        data-package-json="<?= h((string)($package['limits_json'] ?? '{}')) ?>"
+                                                    >
+                                                        <?= icon_svg('edit') ?>
+                                                    </button>
+                                                    <form
+                                                        method="post"
+                                                        class="d-inline"
+                                                        onsubmit="return confirm('Kontovorlage wirklich löschen?')"
+                                                    >
+                                                        <input type="hidden" name="_action" value="delete_package">
+                                                        <input type="hidden" name="_return" value="<?= h($returnPath) ?>">
+                                                        <input type="hidden" name="id" value="<?= (int)$package['id'] ?>">
+                                                        <button
+                                                            class="btn btn-outline-danger btn-sm icon-only status-tooltip"
+                                                            type="submit"
+                                                            <?= icon_button_attrs(t('common.delete')) ?>
+                                                        >
+                                                            <?= icon_svg('trash') ?>
+                                                        </button>
+                                                    </form>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        <?php if ($packageDescription !== ''): ?>
+                                            <tr class="hosting-package-description-row">
+                                                <td colspan="3" class="small text-muted pt-0">
+                                                    <?= h($packageDescription) ?>
+                                                </td>
+                                            </tr>
+                                        <?php endif; ?>
                                     <?php endforeach; ?>
+                                    <?php if (!$packageRows): ?>
+                                        <tr>
+                                            <td colspan="3" class="empty"><?= h(t('hosting.empty')) ?></td>
+                                        </tr>
+                                    <?php endif; ?>
                                 </tbody>
                             </table>
                         </div>
                     </div>
                 </section>
-
-                <?php elseif ($page === 'users'): ?>
-                <section class="row g-4 align-items-start">
-                    <div class="col-12 col-xl">
-                        <div class="card">
-                            <div class="card-body">
-                                <div class="section-head">
-                                    <h2 class="h5 mb-0"><?= h(t('users.title')) ?></h2>
-                                </div>
-                                <div class="async-loader" data-users-loader><span class="spinner" aria-hidden="true"></span><span><?= h(t('users.loading')) ?></span></div>
-                                <div class="users-result" data-users-result hidden></div>
-                            </div>
-                        </div>
-                    </div>
-                    <aside class="col-12 col-xl-4">
-                        <div class="card form-panel">
-                            <div class="card-body">
-                                <h2 class="h5"><?= h(t('users.queue_title')) ?></h2>
-                                <form method="post" class="stack"><input type="hidden" name="_action" value="queue_user"><input type="hidden" name="_return" value="<?= h($returnPath) ?>"><input class="form-control" name="username" placeholder="<?= h(t('users.username')) ?>" required><input class="form-control" name="email" type="email" placeholder="<?= h(t('users.email')) ?>" required><input class="form-control" name="password" type="password" placeholder="<?= h(t('users.initial_password')) ?>" required><select class="form-select" name="server_id">
-                                        <option value=""><?= h(t('common.system_wide')) ?></option><?php foreach ($servers as $server): ?><option value="<?= (int)$server['id'] ?>"><?= h($server['name']) ?></option><?php endforeach; ?>
-                                    </select><button class="btn btn-primary"><?= h(t('users.queue_action')) ?></button></form>
-                            </div>
-                        </div>
-                    </aside>
-                </section>
-
-                <?php elseif ($page === 'hosting'): ?>
-                <section class="row g-4 align-items-start">
-                    <div class="col-12 col-xl">
-                        <div class="card">
-                            <div class="card-body">
-                                <div class="section-head">
-                                    <h2 class="h5 mb-0"><?= h(t('hosting.title')) ?></h2>
-                                    <form method="post"><input type="hidden" name="_action" value="import_hosting_plans"><input type="hidden" name="_return" value="<?= h($returnPath) ?>"><button class="btn btn-primary"><?= h(t('hosting.import')) ?></button></form>
-                                </div>
-                                <div class="table-responsive mt-3">
-                                    <table class="table table-hover align-middle">
-                                        <thead>
-                                            <tr>
-                                                <th><?= h(t('hosting.name')) ?></th>
-                                                <th><?= h(t('hosting.scope')) ?></th>
-                                                <th><?= h(t('domains.server')) ?></th>
-                                                <th><?= h(t('hosting.source')) ?></th>
-                                                <th><?= h(t('hosting.description')) ?></th>
-                                            </tr>
-                                        </thead>
-                                        <tbody><?php foreach ($packages as $package): ?><tr>
-                                                <td><?= h($package['name']) ?></td>
-                                                <td><?= h($package['scope']) ?></td>
-                                                <td><?= h($package['server_name'] ?: t('common.system_wide')) ?></td>
-                                                <td><?= $package['external_id'] ? 'KeyHelp #' . h($package['external_id']) : h(t('common.local')) ?></td>
-                                                <td><?= h($package['description']) ?></td>
-                                            </tr><?php endforeach; ?><?php if (!$packages): ?><tr>
-                                                <td colspan="5" class="empty"><?= h(t('hosting.empty')) ?></td>
-                                            </tr><?php endif; ?></tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <aside class="col-12 col-xl-4">
-                        <div class="card form-panel">
-                            <div class="card-body">
-                                <h2 class="h5"><?= h(t('hosting.create_title')) ?></h2>
-                                <form method="post" class="stack"><input type="hidden" name="_action" value="add_package"><input type="hidden" name="_return" value="<?= h($returnPath) ?>"><input class="form-control" name="name" placeholder="<?= h(t('hosting.package_name')) ?>" required><textarea class="form-control" name="description" placeholder="<?= h(t('hosting.description')) ?>"></textarea><textarea class="form-control" name="limits_json" placeholder='{"diskSpace": 10240, "mailboxes": 10}'>{}</textarea><select class="form-select" name="scope">
-                                        <option value="system"><?= h(t('common.system_wide')) ?></option>
-                                        <option value="server"><?= h(t('hosting.scope_server')) ?></option>
-                                    </select><select class="form-select" name="server_id">
-                                        <option value=""><?= h(t('common.all_servers')) ?></option><?php foreach ($servers as $server): ?><option value="<?= (int)$server['id'] ?>"><?= h($server['name']) ?></option><?php endforeach; ?>
-                                    </select><button class="btn btn-primary"><?= h(t('hosting.create_action')) ?></button></form>
-                            </div>
-                        </div>
-                    </aside>
-                </section>
+                <?php include __DIR__ . '/app_hosting_modal.php'; ?>
 
                 <?php elseif ($page === 'server'): ?>
-                <section class="row g-4 align-items-start">
-                    <div class="col-12 col-xl">
-                        <div class="card">
-                            <div class="card-body">
-                                <h2 class="h5"><?= h(t('server.title')) ?></h2>
-                                <div class="server-list"><?php foreach ($servers as $server): ?><div class="server-item border rounded" data-server-id="<?= (int)$server['id'] ?>">
-                                        <div class="server-summary">
-                                            <div><b class="server-name"><?= h($server['name']) ?></b><span class="server-url"><?= h($server['base_url']) ?></span></div><code class="server-key-preview"><?= h(substr((string)$server['api_token'], 0, 10)) ?>...</code><span class="badge status <?= (int)$server['active'] === 1 ? 'text-bg-success' : 'text-bg-danger' ?>"><?= (int)$server['active'] === 1 ? h(t('server.active')) : h(t('server.inactive')) ?></span><button type="button" class="btn btn-outline-secondary btn-sm server-edit-toggle"><?= h(t('common.edit')) ?></button>
-                                        </div>
-                                        <form method="post" class="server-editor ajax-server-form" hidden><input type="hidden" name="_action" value="update_server"><input type="hidden" name="_return" value="<?= h($returnPath) ?>"><input type="hidden" name="id" value="<?= (int)$server['id'] ?>"><input class="form-control" name="name" value="<?= h($server['name']) ?>" required><input class="form-control" name="base_url" value="<?= h($server['base_url']) ?>" required><input class="form-control" name="api_token" type="password" autocomplete="new-password" placeholder="<?= h(t('server.new_api_key')) ?>"><label class="form-check check"><input class="form-check-input" type="checkbox" name="active" value="1" <?= (int)$server['active'] === 1 ? 'checked' : '' ?>> <?= h(t('server.active')) ?></label><button class="btn btn-primary"><?= h(t('common.update')) ?></button></form>
-                                    </div><?php endforeach; ?></div>
-                            </div>
-                        </div>
-                    </div>
-                    <aside class="col-12 col-xl-4">
-                        <div class="card form-panel">
-                            <div class="card-body">
-                                <h2 class="h5"><?= h(t('server.create_title')) ?></h2>
-                                <form method="post" class="stack"><input type="hidden" name="_action" value="add_server"><input type="hidden" name="_return" value="<?= h($returnPath) ?>"><input class="form-control" name="name" placeholder="<?= h(t('hosting.name')) ?>" required><input class="form-control" name="base_url" placeholder="https://server.example.tld" required><input class="form-control" name="api_token" type="password" autocomplete="new-password" placeholder="<?= h(t('server.api_token')) ?>" required><button class="btn btn-primary"><?= h(t('server.save')) ?></button></form>
-                            </div>
-                        </div>
-                    </aside>
-                </section>
-
-                <?php elseif ($page === 'config'): ?>
-                <section class="card config-page">
+                <section class="page-section card">
                     <div class="card-body">
                         <div class="section-head">
-                            <h2 class="h5 mb-0"><?= h(t('config.title')) ?></h2>
+                            <h2 class="h5 mb-0"><?= h(t('server.title')) ?></h2>
+                            <button
+                                type="button"
+                                class="btn btn-primary btn-sm icon-only status-tooltip"
+                                data-bs-toggle="modal"
+                                data-bs-target="#serverCreateModal"
+                                <?= icon_button_attrs(t('server.create_title')) ?>
+                            >
+                                <?= icon_svg('plus') ?>
+                            </button>
                         </div>
-                        <form method="post" class="settings-form mt-3"><input type="hidden" name="_action" value="update_config"><input type="hidden" name="_return" value="<?= h($returnPath) ?>"><label class="form-label" for="locale"><?= h(t('common.language')) ?></label><select class="form-select" id="locale" name="locale"><?php foreach ($supportedLocales as $localeCode => $localeLabel): ?><option value="<?= h($localeCode) ?>" <?= $localeCode === $appLocale ? 'selected' : '' ?>><?= h($localeLabel) ?></option><?php endforeach; ?></select><label class="form-label" for="theme_mode"><?= h(t('config.theme_mode')) ?></label><select class="form-select" id="theme_mode" name="theme_mode"><?php foreach ($themeModeOptions as $option): ?><option value="<?= h($option) ?>" <?= $option === $themeMode ? 'selected' : '' ?>><?= h(t('theme.' . $option)) ?></option><?php endforeach; ?></select><label class="form-label" for="server_refresh_interval"><?= h(t('config.refresh_interval')) ?></label><select class="form-select" id="server_refresh_interval" name="server_refresh_interval"><?php foreach ($serverRefreshIntervalOptions as $option): ?><option value="<?= (int)$option ?>" <?= (int)$option === (int)$serverRefreshInterval ? 'selected' : '' ?>><?= (int)$option === 0 ? h(t('common.off')) : (int)$option . ' ' . h(t('common.seconds')) ?></option><?php endforeach; ?></select><button class="btn btn-primary"><?= h(t('config.save')) ?></button></form>
+
+                        <div class="server-list">
+                            <?php foreach ($servers as $server): ?>
+                                <div class="server-item border rounded" data-server-id="<?= (int)$server['id'] ?>">
+                                    <div class="server-summary">
+                                        <div>
+                                            <span class="server-name-line">
+                                                <b class="server-name"><?= h($server['name']) ?></b>
+                                                <span
+                                                    class="server-active-dot <?= (int)$server['active'] === 1 ? 'is-active' : 'is-inactive' ?> status-tooltip"
+                                                    <?= icon_button_attrs((int)$server['active'] === 1 ? t('server.active') : t('server.inactive')) ?>
+                                                ></span>
+                                            </span>
+                                            <span class="server-url"><?= h($server['base_url']) ?></span>
+                                        </div>
+
+                                        <code class="server-key-preview">
+                                            <?= h(substr((string)$server['api_token'], 0, 10)) ?>...
+                                        </code>
+
+                                        <div class="table-actions">
+                                            <button
+                                                type="button"
+                                                class="btn btn-outline-secondary btn-sm icon-only status-tooltip server-edit-toggle"
+                                                <?= icon_button_attrs(t('common.edit')) ?>
+                                            >
+                                                <?= icon_svg('edit') ?>
+                                            </button>
+                                            <form
+                                                method="post"
+                                                class="d-inline"
+                                                onsubmit="return confirm('Server wirklich löschen? Alle lokal gespeicherten Daten dieses Servers werden entfernt.')"
+                                            >
+                                                <input type="hidden" name="_action" value="delete_server">
+                                                <input type="hidden" name="_return" value="<?= h($returnPath) ?>">
+                                                <input type="hidden" name="id" value="<?= (int)$server['id'] ?>">
+                                                <button
+                                                    class="btn btn-outline-danger btn-sm icon-only status-tooltip"
+                                                    type="submit"
+                                                    <?= icon_button_attrs(t('common.delete')) ?>
+                                                >
+                                                    <?= icon_svg('trash') ?>
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </div>
+
+                                    <form method="post" class="server-editor ajax-server-form" hidden>
+                                        <input type="hidden" name="_action" value="update_server">
+                                        <input type="hidden" name="_return" value="<?= h($returnPath) ?>">
+                                        <input type="hidden" name="id" value="<?= (int)$server['id'] ?>">
+                                        <input class="form-control" name="name" value="<?= h($server['name']) ?>" required>
+                                        <input class="form-control" name="base_url" value="<?= h($server['base_url']) ?>" required>
+                                        <input
+                                            class="form-control"
+                                            name="api_token"
+                                            type="password"
+                                            autocomplete="new-password"
+                                            placeholder="<?= h(t('server.new_api_key')) ?>"
+                                        >
+                                        <label class="form-check check">
+                                            <input
+                                                class="form-check-input"
+                                                type="checkbox"
+                                                name="ssh_link_enabled"
+                                                value="1"
+                                                <?= (int)($server['ssh_link_enabled'] ?? 0) === 1 ? 'checked' : '' ?>
+                                            >
+                                            <?= h(t('server.ssh_link_enabled')) ?>
+                                        </label>
+                                        <input
+                                            class="form-control"
+                                            name="ssh_port"
+                                            type="number"
+                                            min="1"
+                                            max="65535"
+                                            value="<?= h((string)($server['ssh_port'] ?? 22)) ?>"
+                                            placeholder="<?= h(t('server.ssh_port')) ?>"
+                                        >
+                                        <input
+                                            class="form-control"
+                                            name="ssh_username"
+                                            value="<?= h((string)($server['ssh_username'] ?? '')) ?>"
+                                            placeholder="<?= h(t('server.ssh_username')) ?>"
+                                        >
+                                        <label class="form-check check">
+                                            <input
+                                                class="form-check-input"
+                                                type="checkbox"
+                                                name="active"
+                                                value="1"
+                                                <?= (int)$server['active'] === 1 ? 'checked' : '' ?>
+                                            >
+                                            <?= h(t('server.active')) ?>
+                                        </label>
+                                        <button
+                                            class="btn btn-primary icon-only status-tooltip"
+                                            type="submit"
+                                            <?= icon_button_attrs(t('common.save')) ?>
+                                        >
+                                            <?= icon_svg('save') ?>
+                                        </button>
+                                    </form>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
                     </div>
                 </section>
+
+                <div
+                    class="modal fade"
+                    id="serverCreateModal"
+                    tabindex="-1"
+                    aria-hidden="true"
+                    data-bs-backdrop="static"
+                    data-bs-keyboard="false"
+                >
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <form method="post" class="stack">
+                                <div class="modal-header">
+                                    <h2 class="modal-title h5"><?= h(t('server.create_title')) ?></h2>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+
+                                <div class="modal-body stack">
+                                    <input type="hidden" name="_action" value="add_server">
+                                    <input type="hidden" name="_return" value="<?= h($returnPath) ?>">
+                                    <input class="form-control" name="name" placeholder="<?= h(t('hosting.name')) ?>" required>
+                                    <input class="form-control" name="base_url" placeholder="https://server.example.tld" required>
+                                    <input
+                                        class="form-control"
+                                        name="api_token"
+                                        type="password"
+                                        autocomplete="new-password"
+                                        placeholder="<?= h(t('server.api_token')) ?>"
+                                        required
+                                    >
+                                    <label class="form-check check">
+                                        <input class="form-check-input" type="checkbox" name="ssh_link_enabled" value="1">
+                                        <?= h(t('server.ssh_link_enabled')) ?>
+                                    </label>
+                                    <input
+                                        class="form-control"
+                                        name="ssh_port"
+                                        type="number"
+                                        min="1"
+                                        max="65535"
+                                        value="22"
+                                        placeholder="<?= h(t('server.ssh_port')) ?>"
+                                    >
+                                    <input
+                                        class="form-control"
+                                        name="ssh_username"
+                                        placeholder="<?= h(t('server.ssh_username')) ?>"
+                                    >
+                                </div>
+
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+                                        <?= h(t('common.cancel')) ?>
+                                    </button>
+                                    <button
+                                        class="btn btn-primary icon-only status-tooltip"
+                                        type="submit"
+                                        <?= icon_button_attrs(t('common.save')) ?>
+                                    >
+                                        <?= icon_svg('save') ?>
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                <?php elseif ($page === 'billing'): ?>
+                <?php render_partial('billing_content', [
+                    'billing' => $billingData,
+                    'returnPath' => $returnPath,
+                    'userGroups' => $userGroups,
+                    'domains' => $domains,
+                ]); ?>
+                <?php elseif ($page === 'config'): ?>
+                <?php render_partial('config_content', compact(
+                    'billingData',
+                    'returnPath',
+                    'supportedLocales',
+                    'appLocale',
+                    'themeMode',
+                    'themeModeOptions',
+                    'serverRefreshInterval',
+                    'serverRefreshIntervalOptions',
+                    'usernamePattern'
+                )); ?>
                 <?php endif; ?>
             </main>
         </div>
@@ -232,5 +742,4 @@
         <script src="https://cdn.jsdelivr.net/npm/dashbrd/dist/assets/js/theme.bundle.js"></script>
         <script type="module" src="/assets/app.js?v=<?= (int)filemtime(dirname(__DIR__) . '/public/assets/app.js') ?>"></script>
     </body>
-
 </html>

@@ -33,4 +33,9 @@ return [
             'hosting_plans' => '/api/v2/hosting-plans',
         ],
     ],
+    'billing' => [
+        // Optional: eigener TCPDF-Pfad, falls das Systempaket nicht im PHP include_path liegt.
+        // Ubuntu 24.04 mit php-tcpdf nutzt meist /usr/share/php/tcpdf/autoload.php.
+        'tcpdf_path' => '',
+    ],
 ];

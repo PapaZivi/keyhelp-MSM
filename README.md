@@ -77,3 +77,15 @@ To add a language, create a new file such as `fr.json` with this structure:
 ```
 
 The application automatically detects all `lang/*.json` files. The default language can be set on the configuration page or via `app.locale` in `config/config.php`.
+
+## Abrechnung
+
+Das Abrechnungstool befindet sich im Menuepunkt `Abrechnung`. Dort werden Steuersaetze, TLD-Preise, Domain-Sonderpreise, Benutzer-Rabatte, freie Rechnungsposten und der Freigabe-/Sammelversand-Workflow verwaltet.
+
+Der manuelle Rechnungslauf startet ueber die Schaltflaeche `Rechnungslauf starten`. Fuer Cronjobs kann derselbe Lauf ohne Browser-Sitzung ausgefuehrt werden:
+
+```bash
+php bin/billing-run.php
+```
+
+Die wichtigsten Einstellungen sind Rechnungsabsender, weitere Benachrichtigungsempfaenger und das Rechnungsnummernformat. Unterstuetzte Variablen sind `{{JAHR}}`, `{{MONAT}}`, `{{TAG}}`, `{{LFNR}}`, `{{USERID}}` und `{{USERNAME}}`; Standard ist `{{JAHR}}{{MONAT}}{{TAG}}-{{LFNR}}`.
