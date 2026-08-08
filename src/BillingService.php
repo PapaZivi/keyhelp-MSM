@@ -34,9 +34,12 @@ final class BillingService
 
     public static function applyDiscounts(int $baseCents, float ...$discounts): array
     {
-        $current = max(0, $baseCents);
+        $current = $baseCents;
         $effectiveFactor = 1.0;
         foreach ($discounts as $discount) {
+            if ($current <= 0) {
+                break;
+            }
             $discount = min(100.0, max(0.0, $discount));
             $factor = (100.0 - $discount) / 100.0;
             $current = (int)round($current * $factor, 0, PHP_ROUND_HALF_UP);
@@ -694,7 +697,7 @@ final class BillingService
             mkdir($dir, 0775, true);
         }
         $path = $dir . '/' . preg_replace('/[^A-Za-z0-9_-]+/', '_', (string)$invoice['invoice_number']) . '.pdf';
-        (new InvoicePdfRenderer($this->config))->write(
+        (new InvoicePdfRenderer($this->config + ['formats' => $this->repo->formatSettings()]))->write(
             $invoice,
             $items,
             $path,

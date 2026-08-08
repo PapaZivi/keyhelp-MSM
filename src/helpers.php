@@ -171,14 +171,61 @@ function format_date_local(null|string $value): string
     } catch (Throwable) {
         return $value;
     }
-    return current_locale() === 'en' ? $date->format('m/d/Y') : $date->format('d.m.Y');
+    return match ((string)($GLOBALS['format_settings']['date_format'] ?? 'auto')) {
+        'mdy' => $date->format('m/d/Y'),
+        'ymd' => $date->format('Y-m-d'),
+        default => str_starts_with(format_locale_current(), 'en') ? $date->format('m/d/Y') : $date->format('d.m.Y'),
+    };
 }
 
 function locale_number(float $value, int $decimals): string
 {
-    return current_locale() === 'en'
+    $separator = $GLOBALS['format_settings']['decimal_separator'] ?? 'auto';
+    if ($separator === 'dot') {
+        return number_format($value, $decimals, '.', ',');
+    }
+    if ($separator === 'comma') {
+        return number_format($value, $decimals, ',', '.');
+    }
+    return str_starts_with(format_locale_current(), 'en')
         ? number_format($value, $decimals, '.', ',')
         : number_format($value, $decimals, ',', '.');
+}
+
+function format_time_local(null|string $value): string
+{
+    if ($value === null || $value === '') {
+        return '';
+    }
+    try {
+        $date = new DateTimeImmutable($value);
+    } catch (Throwable) {
+        return $value;
+    }
+    return (string)($GLOBALS['format_settings']['time_format'] ?? 'auto') === '12'
+        ? $date->format('h:i:s A')
+        : $date->format('H:i:s');
+}
+
+function format_datetime_local(null|string $value): string
+{
+    if ($value === null || $value === '') {
+        return '';
+    }
+    return trim(format_date_local($value) . ' ' . format_time_local($value));
+}
+
+function format_locale_current(): string
+{
+    $locale = (string)($GLOBALS['format_settings']['locale'] ?? 'auto');
+    if ($locale !== 'auto') {
+        return str_replace('_', '-', $locale);
+    }
+    $accepted = (string)($_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? '');
+    if (preg_match('/^[a-z]{2,3}(?:[-_][A-Z]{2})?/i', $accepted, $match)) {
+        return str_replace('_', '-', $match[0]);
+    }
+    return current_locale();
 }
 
 function format_bytes_de(null|int|float|string $bytes): string

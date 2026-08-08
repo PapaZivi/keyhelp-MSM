@@ -729,7 +729,12 @@ foreach ($packages as $package) {
                     'supportedLocales',
                     'appLocale',
                     'themeMode',
+                    'formatSettings',
                     'themeModeOptions',
+                    'formatLocaleOptions',
+                    'dateFormatOptions',
+                    'timeFormatOptions',
+                    'decimalSeparatorOptions',
                     'serverRefreshInterval',
                     'serverRefreshIntervalOptions',
                     'usernamePattern'
@@ -737,7 +742,10 @@ foreach ($packages as $package) {
                 <?php endif; ?>
             </main>
         </div>
-        <script>window.KH_I18N = <?= json_encode($jsMessages, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;</script>
+        <script>
+            window.KH_I18N = <?= json_encode($jsMessages, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+            window.KH_FORMATS = <?= json_encode($formatSettings ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+        </script>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
         <script src="https://cdn.jsdelivr.net/npm/dashbrd/dist/assets/js/theme.bundle.js"></script>
         <script type="module" src="/assets/app.js?v=<?= (int)filemtime(dirname(__DIR__) . '/public/assets/app.js') ?>"></script>

@@ -16,7 +16,11 @@ function tr(key, fallback = key) {
     return translations[key] || fallback;
 }
 
-const appLocale = document.body.dataset.locale || document.documentElement.lang || navigator.language || 'en-US';
+const formatSettings = window.KH_FORMATS || {};
+const browserLocale = navigator.language || document.documentElement.lang || 'en-US';
+const appLocale = formatSettings.locale && formatSettings.locale !== 'auto'
+    ? formatSettings.locale
+    : browserLocale;
 const serverRefreshIntervalRaw = document.body.getAttribute('data-server-refresh-interval');
 const configuredServerRefreshInterval = serverRefreshIntervalRaw === null ? 60 : parseInt(serverRefreshIntervalRaw, 10);
 const serverRefreshIntervalSeconds = Number.isFinite(configuredServerRefreshInterval) && configuredServerRefreshInterval >= 0 ? configuredServerRefreshInterval : 60;
@@ -127,13 +131,74 @@ function formatDisplayDate(value) {
     if (Number.isNaN(date.getTime())) {
         return String(value);
     }
+    if (formatSettings.date_format === 'dmy') {
+        return String(date.getDate()).padStart(2, '0') + '.'
+            + String(date.getMonth() + 1).padStart(2, '0') + '.'
+            + date.getFullYear();
+    }
+    if (formatSettings.date_format === 'mdy') {
+        return String(date.getMonth() + 1).padStart(2, '0') + '/'
+            + String(date.getDate()).padStart(2, '0') + '/'
+            + date.getFullYear();
+    }
+    if (formatSettings.date_format === 'ymd') {
+        return date.getFullYear() + '-'
+            + String(date.getMonth() + 1).padStart(2, '0') + '-'
+            + String(date.getDate()).padStart(2, '0');
+    }
     return new Intl.DateTimeFormat(appLocale).format(date);
+}
+
+function formatDecimal(value, decimals = 2) {
+    const number = Number(String(value || '0').replace(',', '.'));
+    if (!Number.isFinite(number)) {
+        return String(value || '');
+    }
+    const formatted = new Intl.NumberFormat(appLocale, {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+    }).format(number);
+    if (formatSettings.decimal_separator === 'comma') {
+        return formatted.replace(/[.,]/g, (separator) => separator === '.' ? ',' : '.');
+    }
+    if (formatSettings.decimal_separator === 'dot') {
+        return formatted.replace(/[.,]/g, (separator) => separator === ',' ? '.' : ',');
+    }
+    return formatted;
+}
+
+function formatMoney(value) {
+    const currency = /^[A-Z]{3}$/.test(String(formatSettings.currency || ''))
+        ? formatSettings.currency
+        : 'EUR';
+    return formatDecimal(value, 2) + ' ' + currency;
+}
+
+function formatDisplayTime(date) {
+    const options = {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+    };
+    if (formatSettings.time_format === '12') {
+        options.hour12 = true;
+    }
+    if (formatSettings.time_format === '24') {
+        options.hour12 = false;
+    }
+    return new Intl.DateTimeFormat(appLocale, options).format(date);
 }
 
 function billingFrequencyLabel(value) {
     const frequency = value || 'yearly';
     const key = frequency === 'halfyearly' ? 'semiannual' : frequency;
     return tr('billing.frequency_' + key, frequency);
+}
+
+function billingItemStatusLabel(item) {
+    return String(item.active || '') === '1'
+        ? tr('server.active', 'active')
+        : tr('common.inactive', 'inactive');
 }
 
 function updateDomainCell(row, fieldName, value) {
@@ -632,15 +697,13 @@ function renderUserBillingItems(form, items) {
         return;
     }
     const rows = safeItems.map((item) => {
-        const status = String(item.active || '') === '1'
-            ? tr('server.active', 'active')
-            : tr('common.inactive', 'inactive');
         return '<tr>'
             + '<td>' + escapeHtml(item.description || '') + '</td>'
-            + '<td>' + escapeHtml(item.amount || '') + '</td>'
-            + '<td>' + escapeHtml(item.booking_date || '') + '</td>'
-            + '<td>' + escapeHtml(item.frequency || '') + '</td>'
-            + '<td>' + escapeHtml(status) + '</td>'
+            + '<td>' + escapeHtml(formatMoney(item.amount || '0')) + '</td>'
+            + '<td>' + escapeHtml(formatDisplayDate(item.booking_date || '')) + '</td>'
+            + '<td>' + escapeHtml(billingFrequencyLabel(item.frequency || 'once')) + '</td>'
+            + '<td>' + escapeHtml(billingItemStatusLabel(item)) + '</td>'
+            + '<td><button type="button" class="btn btn-sm btn-outline-danger billing-item-delete" data-billing-item-id="' + escapeHtml(item.id || '') + '">' + escapeHtml(tr('common.delete', 'Delete')) + '</button></td>'
             + '</tr>';
     }).join('');
     target.innerHTML = '<h3 class="h6 mt-4">' + escapeHtml(tr('billing.existing_user_items', 'Existing billing items')) + '</h3>'
@@ -651,6 +714,7 @@ function renderUserBillingItems(form, items) {
         + '<th>' + escapeHtml(tr('billing.booking_date', 'Booking date')) + '</th>'
         + '<th>' + escapeHtml(tr('billing.interval', 'Interval')) + '</th>'
         + '<th>' + escapeHtml(tr('common.status', 'Status')) + '</th>'
+        + '<th>' + escapeHtml(tr('common.actions', 'Actions')) + '</th>'
         + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
 }
 
@@ -1013,10 +1077,16 @@ function formatRefreshDate(timestamp) {
     if (Number.isNaN(date.getTime())) {
         return '';
     }
-    const options = {
-        dateStyle: 'medium',
-        timeStyle: 'medium',
-    };
+    if (formatSettings.date_format && formatSettings.date_format !== 'auto') {
+        return formatDisplayDate(date.toISOString().slice(0, 10)) + ' ' + formatDisplayTime(date);
+    }
+    const options = { dateStyle: 'medium', timeStyle: 'medium' };
+    if (formatSettings.time_format === '12') {
+        options.hour12 = true;
+    }
+    if (formatSettings.time_format === '24') {
+        options.hour12 = false;
+    }
     try {
         return new Intl.DateTimeFormat(appLocale, options).format(date);
     } catch (error) {
@@ -1735,6 +1805,47 @@ document.addEventListener('submit', async (event) => {
         const modalElement = form.closest('.modal');
         window.bootstrap?.Modal?.getInstance(modalElement)?.hide();
         showToast(data.message || tr('js.user_created', 'User created.'));
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
+
+document.addEventListener('click', async (event) => {
+    const button = event.target.closest('.billing-item-delete');
+    if (!button) {
+        return;
+    }
+    const form = button.closest('.ajax-user-create-form');
+    const itemId = button.dataset.billingItemId || '';
+    const userId = form?.querySelector('[data-user-create-local-id]')?.value || '';
+    if (!form || !itemId) {
+        return;
+    }
+    const question = tr('billing.confirm_delete_user_item', 'Delete this billing item?');
+    if (!window.confirm(question)) {
+        return;
+    }
+    const body = new FormData();
+    body.set('_action', 'delete_billing_user_item');
+    body.set('id', itemId);
+    body.set('user_id', userId);
+    button.disabled = true;
+    try {
+        const data = await postAjax(body);
+        renderUserBillingItems(form, data.items || []);
+        const row = document.querySelector('[data-user-row][data-user-id="' + CSS.escape(userId) + '"]');
+        if (row?.dataset.userJson) {
+            try {
+                const payload = JSON.parse(row.dataset.userJson);
+                payload._billing_items = data.items || [];
+                row.dataset.userJson = JSON.stringify(payload);
+            } catch (error) {
+                // The modal already has the fresh data; stale row cache is non-critical.
+            }
+        }
+        showToast(data.message || tr('billing.user_item_deleted', 'Billing item deleted.'));
     } catch (error) {
         showToast(error.message, 'error');
     } finally {

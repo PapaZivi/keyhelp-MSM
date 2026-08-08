@@ -267,8 +267,8 @@ HTML;
         if (abs($number) < 0.0005) {
             return '';
         }
-        $formatted = number_format($number, 3, ',', '.');
-        $formatted = rtrim(rtrim($formatted, '0'), ',');
+        $formatted = $this->formatNumber($number, 3);
+        $formatted = rtrim(rtrim($formatted, '0'), $this->decimalSeparator());
         return $formatted . ' %';
     }
 
@@ -502,7 +502,12 @@ HTML;
             return '';
         }
         try {
-            return (new DateTimeImmutable($date))->format('d.m.Y');
+            $value = new DateTimeImmutable($date);
+            return match ((string)($this->config['formats']['date_format'] ?? 'auto')) {
+                'mdy' => $value->format('m/d/Y'),
+                'ymd' => $value->format('Y-m-d'),
+                default => $value->format('d.m.Y'),
+            };
         } catch (Throwable) {
             return $date;
         }
@@ -510,11 +515,30 @@ HTML;
 
     private function formatQuantity(mixed $quantity): string
     {
-        return rtrim(rtrim(number_format((float)$quantity, 2, ',', '.'), '0'), ',');
+        return rtrim(rtrim($this->formatNumber((float)$quantity, 2), '0'), $this->decimalSeparator());
     }
 
     private function money(mixed $value): string
     {
-        return number_format((float)$value, 2, ',', '.') . ' EUR';
+        $currency = (string)($this->config['formats']['currency'] ?? 'EUR');
+        if (!preg_match('/^[A-Z]{3}$/', $currency)) {
+            $currency = 'EUR';
+        }
+        return $this->formatNumber((float)$value, 2) . ' ' . $currency;
+    }
+
+    private function formatNumber(float $value, int $decimals): string
+    {
+        return number_format($value, $decimals, $this->decimalSeparator(), $this->thousandsSeparator());
+    }
+
+    private function decimalSeparator(): string
+    {
+        return (string)($this->config['formats']['decimal_separator'] ?? 'auto') === 'dot' ? '.' : ',';
+    }
+
+    private function thousandsSeparator(): string
+    {
+        return $this->decimalSeparator() === ',' ? '.' : ',';
     }
 }

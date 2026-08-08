@@ -407,6 +407,22 @@
         "message.server_reboot_started": "[SERVER] {name}: riavvio avviato.",
         "message.server_reboot_failed": "Non è stato possibile avviare il riavvio del server. I dettagli sono stati scritti nel log.",
         "billing.backbill_invoice_result": "{count} Nachberechnungsposten gesammelt und Rechnung {invoice} erstellt.",
-        "billing.backbill_domain_schedule_hint": "Ohne manuellen Zeitraum wird je Domain das Feld \"Nächste Abrechnung\" verwendet und nach dem eingestellten Intervall weitergeschoben."
+        "billing.backbill_domain_schedule_hint": "Ohne manuellen Zeitraum wird je Domain das Feld \"Nächste Abrechnung\" verwendet und nach dem eingestellten Intervall weitergeschoben.",
+        "billing.user_item_deleted": "Billing item deleted.",
+        "billing.confirm_delete_user_item": "Delete this billing item?",
+        "config.format_locale": "Formatting",
+        "config.format_locale_auto": "Browser / system",
+        "config.currency_code": "Currency",
+        "config.date_format": "Date format",
+        "config.time_format": "Time format",
+        "config.decimal_separator": "Decimal separator",
+        "config.format_auto": "Automatic",
+        "config.date_format_dmy": "Day.month.year",
+        "config.date_format_mdy": "Month/day/year",
+        "config.date_format_ymd": "Year-month-day",
+        "config.time_format_24": "24-hour",
+        "config.time_format_12": "12-hour",
+        "config.decimal_separator_comma": "Comma",
+        "config.decimal_separator_dot": "Dot"
     }
 }

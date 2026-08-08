@@ -432,6 +432,22 @@
         "billing.item_domain_backbill": "Domain-Nachberechnung",
         "billing.backbill_result": "{count} Nachberechnungsposten gesammelt.",
         "billing.backbill_invoice_result": "{count} Nachberechnungsposten gesammelt und Rechnung {invoice} erstellt.",
-        "billing.backbill_domain_schedule_hint": "Ohne manuellen Zeitraum wird je Domain das Feld \"Nächste Abrechnung\" verwendet und nach dem eingestellten Intervall weitergeschoben."
+        "billing.backbill_domain_schedule_hint": "Ohne manuellen Zeitraum wird je Domain das Feld \"Nächste Abrechnung\" verwendet und nach dem eingestellten Intervall weitergeschoben.",
+        "billing.user_item_deleted": "Abrechnungsposten gelöscht.",
+        "billing.confirm_delete_user_item": "Diesen Abrechnungsposten wirklich löschen?",
+        "config.format_locale": "Formatierung",
+        "config.format_locale_auto": "Browser / System",
+        "config.currency_code": "Währung",
+        "config.date_format": "Datumsformat",
+        "config.time_format": "Uhrzeitformat",
+        "config.decimal_separator": "Dezimalzeichen",
+        "config.format_auto": "Automatisch",
+        "config.date_format_dmy": "Tag.Monat.Jahr",
+        "config.date_format_mdy": "Monat/Tag/Jahr",
+        "config.date_format_ymd": "Jahr-Monat-Tag",
+        "config.time_format_24": "24 Stunden",
+        "config.time_format_12": "12 Stunden",
+        "config.decimal_separator_comma": "Komma",
+        "config.decimal_separator_dot": "Punkt"
     }
 }

@@ -59,7 +59,7 @@
                                 </label>
                                 <label class="form-label">
                                     <?= h(t('billing.net_amount')) ?>
-                                    <input class="form-control" name="billing_item_amount" type="number" step="0.01" min="0">
+                                    <input class="form-control" name="billing_item_amount" type="number" step="0.01">
                                 </label>
                                 <label class="form-label">
                                     <?= h(t('billing.tax_rate')) ?>

@@ -31,6 +31,52 @@ $taxOptions = static function (array $taxRates, mixed $selected = null): void {
                     <select class="form-select" id="locale" name="locale"><?php foreach ($supportedLocales as $localeCode => $localeLabel): ?><option value="<?= h($localeCode) ?>" <?= $localeCode === $appLocale ? 'selected' : '' ?>><?= h($localeLabel) ?></option><?php endforeach; ?></select>
                     <label class="form-label" for="theme_mode"><?= h(t('config.theme_mode')) ?></label>
                     <select class="form-select" id="theme_mode" name="theme_mode"><?php foreach ($themeModeOptions as $option): ?><option value="<?= h($option) ?>" <?= $option === $themeMode ? 'selected' : '' ?>><?= h(t('theme.' . $option)) ?></option><?php endforeach; ?></select>
+                    <div class="billing-form-grid mt-3">
+                        <label class="form-label" for="format_locale">
+                            <?= h(t('config.format_locale')) ?>
+                            <select class="form-select" id="format_locale" name="format_locale">
+                                <?php foreach ($formatLocaleOptions as $option): ?>
+                                <option value="<?= h($option) ?>" <?= $option === ($formatSettings['locale'] ?? 'auto') ? 'selected' : '' ?>>
+                                    <?= h($option === 'auto' ? t('config.format_locale_auto') : $option) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </label>
+                        <label class="form-label" for="currency_code">
+                            <?= h(t('config.currency_code')) ?>
+                            <input class="form-control" id="currency_code" name="currency_code" maxlength="3" value="<?= h($formatSettings['currency'] ?? 'EUR') ?>">
+                        </label>
+                        <label class="form-label" for="date_format">
+                            <?= h(t('config.date_format')) ?>
+                            <select class="form-select" id="date_format" name="date_format">
+                                <?php foreach ($dateFormatOptions as $option): ?>
+                                <option value="<?= h($option) ?>" <?= $option === ($formatSettings['date_format'] ?? 'auto') ? 'selected' : '' ?>>
+                                    <?= h($option === 'auto' ? t('config.format_auto') : t('config.date_format_' . $option)) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </label>
+                        <label class="form-label" for="time_format">
+                            <?= h(t('config.time_format')) ?>
+                            <select class="form-select" id="time_format" name="time_format">
+                                <?php foreach ($timeFormatOptions as $option): ?>
+                                <option value="<?= h($option) ?>" <?= $option === ($formatSettings['time_format'] ?? 'auto') ? 'selected' : '' ?>>
+                                    <?= h($option === 'auto' ? t('config.format_auto') : t('config.time_format_' . $option)) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </label>
+                        <label class="form-label" for="decimal_separator">
+                            <?= h(t('config.decimal_separator')) ?>
+                            <select class="form-select" id="decimal_separator" name="decimal_separator">
+                                <?php foreach ($decimalSeparatorOptions as $option): ?>
+                                <option value="<?= h($option) ?>" <?= $option === ($formatSettings['decimal_separator'] ?? 'auto') ? 'selected' : '' ?>>
+                                    <?= h($option === 'auto' ? t('config.format_auto') : t('config.decimal_separator_' . $option)) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </label>
+                    </div>
                     <button class="btn btn-primary icon-only status-tooltip" type="submit"<?= icon_button_attrs(t('config.save')) ?>><?= icon_svg('save') ?></button>
                 </form>
             </div>

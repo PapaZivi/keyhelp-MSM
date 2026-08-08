@@ -107,5 +107,5 @@ function i18n_translate(string $key, array $params = [], string $fallback = '', 
 function i18n_js_messages(): array
 {
     $messages = $GLOBALS['i18n_messages'] ?? [];
-    return array_filter($messages, static fn(string $key): bool => str_starts_with($key, 'js.') || in_array($key, ['common.unknown', 'common.loading', 'server.active', 'server.inactive', 'common.off', 'domains.locked_or_disabled', 'users.create_title', 'users.edit_title'], true), ARRAY_FILTER_USE_KEY);
+    return array_filter($messages, static fn(string $key): bool => str_starts_with($key, 'js.') || str_starts_with($key, 'billing.') || in_array($key, ['common.unknown', 'common.loading', 'common.actions', 'common.delete', 'common.status', 'common.inactive', 'server.active', 'server.inactive', 'common.off', 'domains.locked_or_disabled', 'users.create_title', 'users.edit_title'], true), ARRAY_FILTER_USE_KEY);
 }

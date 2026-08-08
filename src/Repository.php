@@ -47,6 +47,48 @@ final class Repository
         return $mode;
     }
 
+    public function formatSettings(): array
+    {
+        return [
+            'locale' => $this->setting('format_locale', 'auto'),
+            'currency' => $this->setting('currency_code', 'EUR'),
+            'date_format' => $this->setting('date_format', 'auto'),
+            'time_format' => $this->setting('time_format', 'auto'),
+            'decimal_separator' => $this->setting('decimal_separator', 'auto'),
+        ];
+    }
+
+    public function updateFormatSettings(array $data): array
+    {
+        $current = $this->formatSettings();
+        $locale = (string)($data['format_locale'] ?? $current['locale']);
+        if ($locale !== 'auto' && !preg_match('/^[a-z]{2,3}(?:[-_][A-Z]{2})?$/', $locale)) {
+            throw new RuntimeException('Ungueltige Formatierung.');
+        }
+        $currency = strtoupper(trim((string)($data['currency_code'] ?? $current['currency'])));
+        if (!preg_match('/^[A-Z]{3}$/', $currency)) {
+            throw new RuntimeException('Ungueltige Waehrung.');
+        }
+        $dateFormat = (string)($data['date_format'] ?? $current['date_format']);
+        if (!in_array($dateFormat, self::dateFormatOptions(), true)) {
+            throw new RuntimeException('Ungueltiges Datumsformat.');
+        }
+        $timeFormat = (string)($data['time_format'] ?? $current['time_format']);
+        if (!in_array($timeFormat, self::timeFormatOptions(), true)) {
+            throw new RuntimeException('Ungueltiges Uhrzeitformat.');
+        }
+        $decimalSeparator = (string)($data['decimal_separator'] ?? $current['decimal_separator']);
+        if (!in_array($decimalSeparator, self::decimalSeparatorOptions(), true)) {
+            throw new RuntimeException('Ungueltiges Dezimalzeichen.');
+        }
+        $this->saveSetting('format_locale', $locale);
+        $this->saveSetting('currency_code', $currency);
+        $this->saveSetting('date_format', $dateFormat);
+        $this->saveSetting('time_format', $timeFormat);
+        $this->saveSetting('decimal_separator', $decimalSeparator);
+        return $this->formatSettings();
+    }
+
     public function usernamePattern(): string
     {
         return $this->setting('username_pattern', '{{servername_short}}_user_{{NUMMER:2}}');
@@ -69,6 +111,26 @@ final class Repository
     public static function themeModeOptions(): array
     {
         return ['auto', 'light', 'dark'];
+    }
+
+    public static function formatLocaleOptions(): array
+    {
+        return ['auto', 'de-DE', 'en-US', 'en-GB', 'fr-FR', 'it-IT', 'es-ES'];
+    }
+
+    public static function dateFormatOptions(): array
+    {
+        return ['auto', 'dmy', 'mdy', 'ymd'];
+    }
+
+    public static function timeFormatOptions(): array
+    {
+        return ['auto', '24', '12'];
+    }
+
+    public static function decimalSeparatorOptions(): array
+    {
+        return ['auto', 'comma', 'dot'];
     }
 
     public static function billingFrequencyOptions(): array
@@ -975,6 +1037,13 @@ final class Repository
         $stmt->execute([$id]);
     }
 
+    public function deleteBillingUserItem(int $id): void
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM billing_user_items WHERE id = ?');
+        $stmt->execute([$id]);
+        $this->audit('admin', 'billing_user_item_deleted', 'billing_user_item', $id);
+    }
+
     public function addPendingBillingItem(array $item): int
     {
         $stmt = $this->pdo->prepare('
@@ -1116,7 +1185,9 @@ final class Repository
         $discountFactor = (100.0 - $userDiscount) / 100.0;
         foreach ($items as $item) {
             $itemNet = $this->decimalToCents($item['net_total']);
-            $discountedNet = (int)round($itemNet * $discountFactor, 0, PHP_ROUND_HALF_UP);
+            $discountedNet = $itemNet > 0
+                ? (int)round($itemNet * $discountFactor, 0, PHP_ROUND_HALF_UP)
+                : $itemNet;
             $itemTax = (int)round($discountedNet * max(0.0, (float)($item['tax_rate_percent'] ?? 0)) / 100.0, 0, PHP_ROUND_HALF_UP);
             $subtotal += $itemNet;
             $tax += $itemTax;

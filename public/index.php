@@ -112,6 +112,7 @@ if (isset($_GET['invoice_pdf'])) {
 
 if (($_GET['ajax'] ?? '') === 'subdomains') {
     header('Content-Type: application/json; charset=utf-8');
+    session_write_close();
     try {
         $subdomains = $sync->subdomainsFor((int)($_GET['server_id'] ?? 0), (string)($_GET['domain'] ?? ''));
         echo json_encode(['ok' => true, 'subdomains' => $subdomains], JSON_UNESCAPED_UNICODE);
@@ -129,6 +130,7 @@ if (($_GET['ajax'] ?? '') === 'subdomains') {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
     header('Content-Type: application/json; charset=utf-8');
+    session_write_close();
     try {
         $action = $_POST['_action'] ?? '';
         if ($action === 'load_dashboard') {
@@ -213,6 +215,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
                 'ok' => true,
                 'message' => $message,
                 'html' => ob_get_clean(),
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        if ($action === 'delete_billing_user_item') {
+            $itemId = (int)($_POST['id'] ?? 0);
+            $userId = (int)($_POST['user_id'] ?? 0);
+            if ($itemId <= 0) {
+                throw new InvalidArgumentException(t('billing.item_required'));
+            }
+            $repo->deleteBillingUserItem($itemId);
+            $items = $userId > 0 ? ($repo->billingUserItemsByUserId()[$userId] ?? []) : [];
+            echo json_encode([
+                'ok' => true,
+                'message' => t('billing.user_item_deleted'),
+                'items' => $items,
             ], JSON_UNESCAPED_UNICODE);
             exit;
         }
@@ -399,6 +416,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $seconds = $repo->updateServerRefreshInterval(isset($_POST['server_refresh_interval']) ? (int)$_POST['server_refresh_interval'] : $repo->serverRefreshInterval());
                 $locale = $repo->updateLocale((string)($_POST['locale'] ?? $repo->locale(current_locale())));
                 $repo->updateThemeMode((string)($_POST['theme_mode'] ?? $repo->themeMode()));
+                $repo->updateFormatSettings($_POST);
                 $repo->updateUsernamePattern((string)($_POST['username_pattern'] ?? $repo->usernamePattern()));
                 i18n_set_locale($locale);
                 $interval = $seconds === 0 ? t('common.off') : $seconds . ' ' . t('common.seconds');
@@ -470,10 +488,16 @@ $actions = $repo->actions();
 $serverRefreshInterval = $repo->serverRefreshInterval();
 $appLocale = $repo->locale(current_locale());
 $themeMode = $repo->themeMode();
+$formatSettings = $repo->formatSettings();
+$GLOBALS['format_settings'] = $formatSettings;
 $usernamePattern = $repo->usernamePattern();
 $billingData = $repo->billingOverview();
 $serverRefreshIntervalOptions = Repository::refreshIntervalOptions();
 $themeModeOptions = Repository::themeModeOptions();
+$formatLocaleOptions = Repository::formatLocaleOptions();
+$dateFormatOptions = Repository::dateFormatOptions();
+$timeFormatOptions = Repository::timeFormatOptions();
+$decimalSeparatorOptions = Repository::decimalSeparatorOptions();
 $allowedPages = ['dashboard', 'domains', 'users', 'hosting', 'server', 'billing', 'config'];
 $page = (string)($_GET['page'] ?? 'dashboard');
 if (!in_array($page, $allowedPages, true)) {
@@ -503,8 +527,13 @@ render_template('app', [
     'serverRefreshInterval' => $serverRefreshInterval,
     'serverRefreshIntervalOptions' => $serverRefreshIntervalOptions,
     'themeMode' => $themeMode,
+    'formatSettings' => $formatSettings,
     'usernamePattern' => $usernamePattern,
     'themeModeOptions' => $themeModeOptions,
+    'formatLocaleOptions' => $formatLocaleOptions,
+    'dateFormatOptions' => $dateFormatOptions,
+    'timeFormatOptions' => $timeFormatOptions,
+    'decimalSeparatorOptions' => $decimalSeparatorOptions,
     'appLocale' => $appLocale,
     'page' => $page,
     'returnPath' => $returnPath,

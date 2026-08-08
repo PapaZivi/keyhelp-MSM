@@ -45,7 +45,7 @@ $taxOptions = static function (array $taxRates, mixed $selected = null): void {
     <div class="billing-toolbar">
         <form method="post"><input type="hidden" name="_action" value="billing_run"><input type="hidden" name="_return" value="<?= h($returnPath) ?>"><button class="btn btn-primary"><?= h(t('billing.run_now')) ?></button></form>
         <form method="post"><input type="hidden" name="_action" value="billing_send_queue"><input type="hidden" name="_return" value="<?= h($returnPath) ?>"><button class="btn btn-outline-primary"><?= h(t('billing.send_queue')) ?></button></form>
-        <span class="billing-muted"><?= h(t('billing.last_run')) ?>: <?= h(format_date_local($settings['last_run_at'] ?? '')) ?></span>
+        <span class="billing-muted"><?= h(t('billing.last_run')) ?>: <?= h(format_datetime_local($settings['last_run_at'] ?? '')) ?></span>
     </div>
 
 
