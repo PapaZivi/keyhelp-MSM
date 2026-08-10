@@ -1,42 +1,62 @@
 # KeyHelp MSM
 
-A central PHP web application for managing multiple KeyHelp servers.
+KeyHelp MSM is a PHP web application for centrally managing multiple KeyHelp servers.
 
-## Initial Scope
+## Current Scope
 
-- manage multiple KeyHelp servers locally
-- synchronize domains across servers and assign them to local billing data
-- create hosting packages centrally and queue them as actions
-- queue users system-wide or for specific servers
-- collect actions first and execute them via sync after manual review
-- stop synchronization at the first server error and log the cause
-- store local data in MySQL
+- Manage multiple KeyHelp servers from one interface.
+- Store server connections locally with protected API key display.
+- Show server dashboard cards with hostname, operating system, kernel, KeyHelp version, CPU load, uptime, traffic, disk usage, refresh timers, reboot actions and optional SSH links.
+- Import domains from all configured servers.
+- Show duplicate domains, disabled or locked domains, deleted domains and scheduled deletion states.
+- Load subdomains on demand via AJAX.
+- Store local domain billing data such as registration date, next billing date, billing interval, registrar and domain-specific prices.
+- Manage local users as the central customer account.
+- Assign remote KeyHelp users to local users independently of their remote usernames.
+- Assign domains to local users, either through their remote user relation or manually.
+- Create remote users from a local user through a wizard.
+- Import hosting plans from KeyHelp servers and store them locally.
+- Manage billing settings, tax rates, TLD prices, domain price overrides and manual billing items.
+- Run global billing or a billing run for one local user.
+- Keep a customer account per local user with invoices, payments, reserved amounts and balance.
+- Record payments with a booking date and an internal creation timestamp.
+- Generate invoice PDFs with TCPDF from an editable HTML template.
+- Preview invoices from billing and customer account views.
+- Approve invoices, queue invoices for batch sending, cancel invoices, delete allowed drafts and requeue cancelled invoice items.
+- Configure language, locale, number/date/time formats, currency, theme mode and dashboard refresh interval.
+- Translate the application through JSON language packs.
 
-## Deployment as a Web Application
+## Deployment As A Web Application
 
-The application is intended for Apache, Nginx, or a comparable web server. The document root must point to `public/`.
+The application is intended for Apache, Nginx or a comparable web server. The document root must point to `public/`.
 
-Example Apache vHost:
+Example Apache vHost for a KeyHelp-managed webspace:
 
 ```apache
 <VirtualHost *:80>
-    ServerName keyhelp-verwaltung.local
-    DocumentRoot "D:/github/keyhelp-verwaltung/public"
+    ServerName khmsm.example.com
+    ServerAdmin webmaster@example.com
+    DocumentRoot /home/users/keyhelpmsm/www/khmsm.example.com/public
 
-    <Directory "D:/github/keyhelp-verwaltung/public">
+    <Directory /home/users/keyhelpmsm/www/khmsm.example.com/public>
         AllowOverride All
         Require all granted
     </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/khmsm.example.com-error.log
+    CustomLog ${APACHE_LOG_DIR}/khmsm.example.com-access.log combined
 </VirtualHost>
 ```
+
+In KeyHelp, create a normal domain or subdomain, point its document root to the application's `public/` directory and enable PHP for that webspace. The files outside `public/` must not be web-accessible.
 
 Example Nginx configuration:
 
 ```nginx
 server {
     listen 80;
-    server_name keyhelp-verwaltung.local;
-    root D:/github/keyhelp-verwaltung/public;
+    server_name khmsm.example.com;
+    root /home/users/keyhelpmsm/www/khmsm.example.com/public;
     index index.php;
 
     location / {
@@ -53,39 +73,69 @@ server {
 
 ## Installation
 
-1. Create a MySQL database and user, for example `keyhelp_verwaltung`.
+1. Create a MySQL database and user, for example `keyhelp_msm`.
 2. Copy `config/config.example.php` to `config/config.php`.
-3. Enter the database credentials, admin password, and KeyHelp servers. By default, the KeyHelp API uses the `X-API-Key` header. If your installation differs, you can adjust `keyhelp.auth` in the configuration.
-4. Use PHP with PDO-MySQL and cURL.
-5. Configure the web server so that only `public/` is publicly accessible.
+3. Enter the database credentials, admin login, KeyHelp servers and logging settings.
+4. Make sure PHP has PDO-MySQL and cURL enabled.
+5. Install TCPDF if invoice PDFs should be generated. On Debian/Ubuntu this can be provided by the `php-tcpdf` package.
+6. Configure the web server so that only `public/` is publicly accessible.
 
-The application automatically creates the required tables on first access.
+The application creates the required tables on first access.
+
+## Database Schema And Migrations
+
+This release uses `database/schema.sql` as the clean baseline schema for fresh installations.
+
+Future database migrations should be added to `src/Migration.php`. `Migration` extends `Database`, so connection handling remains in `Database.php` while release-to-release schema changes live separately.
+
+Older pre-release installations are not automatically migrated by this cleaned release baseline.
+
+## KeyHelp API
+
+By default, KeyHelp API requests use the `X-API-Key` header. If your KeyHelp installation requires another method, adjust the `keyhelp.auth` settings in `config/config.php`.
+
+API requests and responses can be logged through the configured log file and debug level.
+
+## Billing
+
+The billing module is available from the `Billing` navigation item.
+
+It manages:
+
+- tax rates
+- TLD prices
+- domain-specific overrides
+- local user discounts
+- manual billing items
+- domain billing intervals
+- customer account payments
+- invoice approval and sending
+- invoice PDF generation
+
+The global billing run starts from the billing page. A user-specific billing run can be started from the local user's customer account tab.
+
+Invoice PDFs are stored in:
+
+```text
+storage/invoices/
+```
+
+The generated path is also stored in the `invoices.pdf_path` database field.
 
 ## Translations
 
-The web interface supports multiple languages via JSON files in `lang/`. Each file name is the locale code, for example `de.json` or `en.json`.
+The web interface supports multiple languages through JSON files in `lang/`.
 
-To add a language, create a new file such as `fr.json` with this structure:
+Each file must use this structure:
 
 ```json
 {
-  "language": "Français",
+  "language": "English",
+  "locale": "en-US",
   "messages": {
-    "common.save": "Enregistrer"
+    "common.save": "Save"
   }
 }
 ```
 
-The application automatically detects all `lang/*.json` files. The default language can be set on the configuration page or via `app.locale` in `config/config.php`.
-
-## Abrechnung
-
-Das Abrechnungstool befindet sich im Menuepunkt `Abrechnung`. Dort werden Steuersaetze, TLD-Preise, Domain-Sonderpreise, Benutzer-Rabatte, freie Rechnungsposten und der Freigabe-/Sammelversand-Workflow verwaltet.
-
-Der manuelle Rechnungslauf startet ueber die Schaltflaeche `Rechnungslauf starten`. Fuer Cronjobs kann derselbe Lauf ohne Browser-Sitzung ausgefuehrt werden:
-
-```bash
-php bin/billing-run.php
-```
-
-Die wichtigsten Einstellungen sind Rechnungsabsender, weitere Benachrichtigungsempfaenger und das Rechnungsnummernformat. Unterstuetzte Variablen sind `{{JAHR}}`, `{{MONAT}}`, `{{TAG}}`, `{{LFNR}}`, `{{USERID}}` und `{{USERNAME}}`; Standard ist `{{JAHR}}{{MONAT}}{{TAG}}-{{LFNR}}`.
+To add a language, add another JSON file to `lang/`. The application automatically detects available language packs.
