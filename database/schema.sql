@@ -11,9 +11,30 @@ CREATE TABLE IF NOT EXISTS servers (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS local_users (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    display_name VARCHAR(190) NOT NULL,
+    email VARCHAR(190) NULL,
+    invoice_email VARCHAR(190) NULL,
+    customer_number VARCHAR(190) NULL,
+    company VARCHAR(190) NULL,
+    first_name VARCHAR(190) NULL,
+    last_name VARCHAR(190) NULL,
+    phone VARCHAR(190) NULL,
+    address TEXT NULL,
+    postcode VARCHAR(40) NULL,
+    city VARCHAR(190) NULL,
+    region VARCHAR(190) NULL,
+    country VARCHAR(190) NULL,
+    notes TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS domains (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     server_id INT UNSIGNED NOT NULL,
+    local_user_id INT UNSIGNED NULL,
     external_id VARCHAR(190) NULL,
     domain VARCHAR(255) NOT NULL,
     owner_external_id VARCHAR(190) NULL,
@@ -29,23 +50,28 @@ CREATE TABLE IF NOT EXISTS domains (
     domain_zone_c TEXT NULL,
     domain_status INT NULL,
     is_disabled TINYINT(1) NOT NULL DEFAULT 0,
+    is_deleted TINYINT(1) NOT NULL DEFAULT 0,
+    deleted_at DATETIME NULL,
     suspend_on DATE NULL,
     delete_on DATE NULL,
     synced_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uniq_server_domain (server_id, domain),
-    CONSTRAINT fk_domains_server FOREIGN KEY(server_id) REFERENCES servers(id) ON DELETE CASCADE
+    CONSTRAINT fk_domains_server FOREIGN KEY(server_id) REFERENCES servers(id) ON DELETE CASCADE,
+    CONSTRAINT fk_domains_local_user FOREIGN KEY(local_user_id) REFERENCES local_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS keyhelp_users (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     server_id INT UNSIGNED NOT NULL,
+    local_user_id INT UNSIGNED NULL,
     external_id VARCHAR(190) NOT NULL,
     username VARCHAR(190) NOT NULL,
     email VARCHAR(190) NULL,
     raw_json JSON NOT NULL,
     synced_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uniq_server_user (server_id, external_id),
-    CONSTRAINT fk_users_server FOREIGN KEY(server_id) REFERENCES servers(id) ON DELETE CASCADE
+    CONSTRAINT fk_users_server FOREIGN KEY(server_id) REFERENCES servers(id) ON DELETE CASCADE,
+    CONSTRAINT fk_users_local_user FOREIGN KEY(local_user_id) REFERENCES local_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS hosting_packages (
@@ -132,7 +158,7 @@ CREATE TABLE IF NOT EXISTS billing_user_settings (
     last_invoice_at DATE NULL,
     next_invoice_at DATE NULL,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_billing_user_settings_user FOREIGN KEY(user_id) REFERENCES keyhelp_users(id) ON DELETE CASCADE
+    CONSTRAINT fk_billing_user_settings_user FOREIGN KEY(user_id) REFERENCES local_users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS billing_user_items (
@@ -148,7 +174,7 @@ CREATE TABLE IF NOT EXISTS billing_user_items (
     next_billing_at DATE NULL,
     active TINYINT(1) NOT NULL DEFAULT 1,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_billing_user_items_user FOREIGN KEY(user_id) REFERENCES keyhelp_users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_billing_user_items_user FOREIGN KEY(user_id) REFERENCES local_users(id) ON DELETE CASCADE,
     CONSTRAINT fk_billing_user_items_tax FOREIGN KEY(tax_rate_id) REFERENCES billing_tax_rates(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -181,7 +207,7 @@ CREATE TABLE IF NOT EXISTS billing_pending_items (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uniq_pending_billing_reference (billing_reference),
     KEY idx_pending_user (user_id),
-    CONSTRAINT fk_billing_pending_user FOREIGN KEY(user_id) REFERENCES keyhelp_users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_billing_pending_user FOREIGN KEY(user_id) REFERENCES local_users(id) ON DELETE CASCADE,
     CONSTRAINT fk_billing_pending_tax FOREIGN KEY(tax_rate_id) REFERENCES billing_tax_rates(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -202,9 +228,12 @@ CREATE TABLE IF NOT EXISTS invoices (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     approved_at DATETIME NULL,
     sent_at DATETIME NULL,
+    paid_at DATE NULL,
+    payment_reference VARCHAR(190) NULL,
+    payment_note TEXT NULL,
     immutable_at DATETIME NULL,
     UNIQUE KEY uniq_invoice_number (invoice_number),
-    CONSTRAINT fk_invoices_user FOREIGN KEY(user_id) REFERENCES keyhelp_users(id) ON DELETE RESTRICT
+    CONSTRAINT fk_invoices_user FOREIGN KEY(user_id) REFERENCES local_users(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS invoice_items (
@@ -226,6 +255,30 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     UNIQUE KEY uniq_invoice_item_reference (billing_reference),
     CONSTRAINT fk_invoice_items_invoice FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
     CONSTRAINT fk_invoice_items_tax FOREIGN KEY(tax_rate_id) REFERENCES billing_tax_rates(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS billing_payments (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id INT UNSIGNED NOT NULL,
+    paid_at DATE NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    reference VARCHAR(190) NULL,
+    note TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_billing_payments_user (user_id),
+    CONSTRAINT fk_billing_payments_user FOREIGN KEY(user_id) REFERENCES local_users(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS billing_payment_allocations (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    payment_id INT UNSIGNED NOT NULL,
+    invoice_id INT UNSIGNED NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_payment_allocations_payment (payment_id),
+    KEY idx_payment_allocations_invoice (invoice_id),
+    CONSTRAINT fk_payment_allocations_payment FOREIGN KEY(payment_id) REFERENCES billing_payments(id) ON DELETE CASCADE,
+    CONSTRAINT fk_payment_allocations_invoice FOREIGN KEY(invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS billing_audit_log (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

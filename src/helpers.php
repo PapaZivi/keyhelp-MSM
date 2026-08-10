@@ -83,6 +83,8 @@ function icon_svg(string $name): string
         'eye' => '<path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8M1.173 8a13 13 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5s3.879 1.168 5.168 2.457A13 13 0 0 1 14.828 8q-.086.13-.195.288c-.335.48-.83 1.12-1.465 1.755C11.879 11.332 10.119 12.5 8 12.5s-3.879-1.168-5.168-2.457A13 13 0 0 1 1.172 8z"/><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5M4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0"/>',
         'save' => '<path d="M2 1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2.5L13.5 1zM2 0h12l2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2"/><path d="M5.5 1v5h5V1h1v6h-7V1zM4 11.5A1.5 1.5 0 0 1 5.5 10h5a1.5 1.5 0 0 1 1.5 1.5V15h-1v-3.5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0-.5.5V15H4z"/>',
         'plus' => '<path fill-rule="evenodd" d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2"/>',
+        'person-plus' => '<path d="M6 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6m2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0m4.5 2.5a.5.5 0 0 1 .5.5v1.5h1.5a.5.5 0 0 1 0 1H13V12a.5.5 0 0 1-1 0v-1.5h-1.5a.5.5 0 0 1 0-1H12V8a.5.5 0 0 1 .5-.5"/><path d="M6 9c-2.67 0-5 1.34-5 3v1.5A1.5 1.5 0 0 0 2.5 15h7A1.5 1.5 0 0 0 11 13.5V13h-1v.5a.5.5 0 0 1-.5.5h-7a.5.5 0 0 1-.5-.5V12c0-.83 1.67-2 4-2 .73 0 1.4.11 1.97.3a.5.5 0 1 0 .32-.95A7 7 0 0 0 6 9"/>',
+        'x' => '<path d="M2.146 2.146a.5.5 0 0 1 .708 0L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8 2.146 2.854a.5.5 0 0 1 0-.708"/>',
         'refresh' => '<path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>',
         'putty' => '<path d="M2 2.5A1.5 1.5 0 0 1 3.5 1h9A1.5 1.5 0 0 1 14 2.5v6A1.5 1.5 0 0 1 12.5 10H9v1.5h2.5a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1H7V10H3.5A1.5 1.5 0 0 1 2 8.5zM3.5 2a.5.5 0 0 0-.5.5v6a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-6a.5.5 0 0 0-.5-.5z"/><path d="M4.646 4.146a.5.5 0 0 1 .708 0L7.207 6 5.354 7.854a.5.5 0 1 1-.708-.708L5.793 6 4.646 4.854a.5.5 0 0 1 0-.708M7.5 7.5A.5.5 0 0 1 8 7h2.5a.5.5 0 0 1 0 1H8a.5.5 0 0 1-.5-.5"/>',
         'reboot' => '<path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/><path d="M7.5 6.5h1v4h-1z"/>',
@@ -106,6 +108,9 @@ function lock_marker_html(string $title): string
 function domain_row_class(array $domain): string
 {
     $classes = [];
+    if (!empty($domain['is_deleted'])) {
+        $classes[] = 'domain-deleted';
+    }
     if (domain_is_locked($domain)) {
         $classes[] = 'domain-disabled';
     }
@@ -123,7 +128,23 @@ function domain_row_class(array $domain): string
 
 function domain_name_status_html(array $domain): string
 {
-    return domain_is_locked($domain) ? lock_marker_html(t('domains.locked_or_disabled')) : '';
+    $states = [];
+    if (!empty($domain['is_deleted'])) {
+        $states[] = status_calendar_icon('delete', t('domains.deleted'), (string)($domain['deleted_at'] ?? ''));
+    }
+    if (domain_is_locked($domain)) {
+        $states[] = lock_marker_html(t('domains.locked_or_disabled'));
+    } elseif (domain_has_problem($domain)) {
+        $states[] = '<span class="domain-state problem status-tooltip"' . status_tooltip_attrs(t('domains.problem_status')) . '><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="status-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8.982 1.566a1.13 1.13 0 0 0-1.964 0L.165 13.233c-.457.778.091 1.767.982 1.767h13.706c.89 0 1.438-.99.982-1.767zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5m.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2"/></svg></span>';
+    }
+    $suspendOn = domain_suspension_date($domain);
+    if ($suspendOn !== '') {
+        $states[] = status_calendar_icon('suspend', t('users.lock_on'), $suspendOn);
+    }
+    if (!empty($domain['delete_on'])) {
+        $states[] = status_calendar_icon('delete', t('domains.deletion_pending'), (string)$domain['delete_on']);
+    }
+    return implode(' ', $states);
 }
 
 function domain_suspension_date(array $domain): string
@@ -134,6 +155,9 @@ function domain_suspension_date(array $domain): string
 function domain_status_html(array $domain): string
 {
     $states = [];
+    if (!empty($domain['is_deleted'])) {
+        $states[] = status_calendar_icon('delete', t('domains.deleted'), (string)($domain['deleted_at'] ?? ''));
+    }
     if (domain_is_locked($domain)) {
         $states[] = '<span class="domain-state locked status-tooltip"' . status_tooltip_attrs(t('domains.locked_or_disabled')) . '>&#x1F6C7;</span>';
     } elseif (domain_has_problem($domain)) {
@@ -172,6 +196,7 @@ function format_date_local(null|string $value): string
         return $value;
     }
     return match ((string)($GLOBALS['format_settings']['date_format'] ?? 'auto')) {
+        'dmy' => $date->format('d.m.Y'),
         'mdy' => $date->format('m/d/Y'),
         'ymd' => $date->format('Y-m-d'),
         default => str_starts_with(format_locale_current(), 'en') ? $date->format('m/d/Y') : $date->format('d.m.Y'),
@@ -202,9 +227,11 @@ function format_time_local(null|string $value): string
     } catch (Throwable) {
         return $value;
     }
-    return (string)($GLOBALS['format_settings']['time_format'] ?? 'auto') === '12'
-        ? $date->format('h:i:s A')
-        : $date->format('H:i:s');
+    return match ((string)($GLOBALS['format_settings']['time_format'] ?? 'auto')) {
+        '12' => $date->format('h:i:s A'),
+        '24' => $date->format('H:i:s'),
+        default => str_starts_with(format_locale_current(), 'en') ? $date->format('h:i:s A') : $date->format('H:i:s'),
+    };
 }
 
 function format_datetime_local(null|string $value): string

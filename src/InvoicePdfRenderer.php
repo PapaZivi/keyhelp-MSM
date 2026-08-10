@@ -231,6 +231,7 @@ HTML;
             'invoice.total' => $this->e($this->money($invoice['total'] ?? 0)),
             'customer.number' => $this->e((string)($variablesSnapshot['customer_number'] ?? $invoice['username'] ?? '')),
             'customer.email' => $this->e((string)($variablesSnapshot['email'] ?? $invoice['email'] ?? '')),
+            'customer.invoice_email' => $this->e((string)($variablesSnapshot['invoice_email'] ?? $invoice['invoice_email'] ?? $invoice['email'] ?? '')),
             'customer.server' => $this->e((string)($variablesSnapshot['server_name'] ?? $invoice['server_name'] ?? '')),
         ];
     }

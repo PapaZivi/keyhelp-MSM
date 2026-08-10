@@ -386,7 +386,7 @@ foreach ($packages as $package) {
                 <?php elseif ($page === 'domains'): ?>
                 <section class="page-section card">
                     <div class="card-body" data-domain-import-area>
-                        <?php render_partial('domains_content', compact('domains', 'returnPath', 'billingDomainOverrides', 'billingTaxRates')); ?>
+                        <?php render_partial('domains_content', compact('domains', 'returnPath', 'localUsers', 'billingDomainOverrides', 'billingTaxRates')); ?>
                     </div>
                 </section>
 
@@ -396,12 +396,21 @@ foreach ($packages as $package) {
                         <?php render_partial('users_content', compact(
                             'userGroups',
                             'returnPath',
+                            'localUsers',
+                            'remoteUsersByLocalUserId',
+                            'domainsByLocalUserId',
+                            'unassignedRemoteUsers',
+                            'localUserDeleteBlockers',
+                            'customerAccountBalances',
+                            'customerAccountEntries',
                             'billingUserSettings',
                             'billingUserItems'
                         )); ?>
                     </div>
                 </section>
                 <?php include __DIR__ . '/app_user_modal.php'; ?>
+                <?php include __DIR__ . '/app_local_user_modal.php'; ?>
+                <?php include __DIR__ . '/app_remote_user_wizard.php'; ?>
 
                 <?php elseif ($page === 'hosting'): ?>
                 <?php
@@ -722,6 +731,7 @@ foreach ($packages as $package) {
                     'userGroups' => $userGroups,
                     'domains' => $domains,
                 ]); ?>
+                <?php include __DIR__ . '/app_invoice_payment_modal.php'; ?>
                 <?php elseif ($page === 'config'): ?>
                 <?php render_partial('config_content', compact(
                     'billingData',

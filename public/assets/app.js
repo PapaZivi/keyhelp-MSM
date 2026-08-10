@@ -16,6 +16,13 @@ function tr(key, fallback = key) {
     return translations[key] || fallback;
 }
 
+function localDateInputValue(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return year + '-' + month + '-' + day;
+}
+
 const formatSettings = window.KH_FORMATS || {};
 const browserLocale = navigator.language || document.documentElement.lang || 'en-US';
 const appLocale = formatSettings.locale && formatSettings.locale !== 'auto'
@@ -222,33 +229,22 @@ function domainIsLocked(domain) {
 }
 
 function updateDomainNameStatus(row, domain) {
-    const container = row.querySelector('.name-with-status');
+    const container = row.querySelector('.domain-status-icons');
     if (!container) {
         return;
     }
-    container.querySelector('.status-lock-marker')?.remove();
-    if (domainIsLocked(domain)) {
-        const marker = document.createElement('span');
-        marker.className = 'status-lock-marker';
-        marker.textContent = String.fromCodePoint(0x1F6C7);
-        const title = tr('domains.locked_or_disabled', 'Locked or disabled');
-        marker.classList.add('status-tooltip');
-        marker.setAttribute('data-bs-toggle', 'tooltip');
-        marker.setAttribute('data-bs-placement', 'top');
-        marker.setAttribute('data-bs-trigger', 'hover');
-        marker.setAttribute('data-bs-title', title);
-        marker.setAttribute('aria-label', title);
-        container.append(marker);
-        initStatusTooltips(container);
-    }
+    initStatusTooltips(container);
 }
 function applyDomainData(row, domain, rowClass = '', statusHtml = '') {
-    row.querySelector('td:nth-child(3)').textContent = domain.owner_name || (domain.owner_external_id ? 'User #' + domain.owner_external_id : '');
+    updateDomainCell(row, 'owner', domain.local_user_name || domain.owner_name || (domain.owner_external_id ? 'User #' + domain.owner_external_id : ''));
     updateDomainCell(row, 'registered_at', domain.registered_at || '');
     updateDomainCell(row, 'next_billing_at', domain.next_billing_at || '');
     updateDomainCell(row, 'billing_frequency', domain.billing_frequency || 'yearly');
     updateDomainCell(row, 'registrar', domain.registrar || '');
-    row.querySelector('.domain-status-cell').innerHTML = statusHtml || '';
+    const statusContainer = row.querySelector('.domain-status-icons');
+    if (statusContainer) {
+        statusContainer.innerHTML = statusHtml || '';
+    }
     initStatusTooltips(row);
     updateDomainNameStatus(row, domain);
     row.className = 'domain-row ' + (rowClass || '');
@@ -766,6 +762,7 @@ function fillUserForm(form, user) {
     setFormValue(form, 'username', user.username || '');
     setFormValue(form, 'language', user.language || 'de');
     setFormValue(form, 'email', user.email || '');
+    setFormValue(form, 'local_user_id', user.local_user_id || '');
     setFormValue(form, 'notes', user.notes || '');
 
     const contact = user.contact_data || {};
@@ -852,6 +849,288 @@ function fillUserForm(form, user) {
     applyPermissionResourceLocks(form);
 }
 
+function renderLocalUserRemotes(form, remotes) {
+    const target = form.querySelector('[data-local-user-remotes]');
+    if (!target) {
+        return;
+    }
+    if (!remotes || remotes.length === 0) {
+        target.innerHTML = '<p class="billing-muted">' + escapeHtml(tr('users.no_remote_users_assigned', 'No remote users assigned.')) + '</p>';
+        return;
+    }
+    const rows = remotes.map((user) => '<tr>'
+        + '<td>' + escapeHtml(user.server_name || '') + '</td>'
+        + '<td>' + escapeHtml(user.username || '') + '</td>'
+        + '<td>' + escapeHtml(user.email || '') + '</td>'
+        + '<td>' + escapeHtml(user.external_id || '') + '</td>'
+        + '</tr>').join('');
+    target.innerHTML = '<div class="table-responsive"><table class="table table-sm align-middle mb-0">'
+        + '<thead><tr>'
+        + '<th>' + escapeHtml(tr('domains.server', 'Server')) + '</th>'
+        + '<th>' + escapeHtml(tr('js.user', 'User')) + '</th>'
+        + '<th>' + escapeHtml(tr('users.email', 'E-mail')) + '</th>'
+        + '<th>' + escapeHtml(tr('js.id', 'ID')) + '</th>'
+        + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
+
+function renderLocalUserDomains(form, domains) {
+    const target = form.querySelector('[data-local-user-domains]');
+    if (!target) {
+        return;
+    }
+    if (!domains || domains.length === 0) {
+        target.innerHTML = '<p class="billing-muted">' + escapeHtml(tr('users.no_domains_assigned', 'No domains assigned.')) + '</p>';
+        return;
+    }
+    const rows = domains.map((domain) => {
+        const rowId = 'subdomains-local-' + escapeHtml(domain.id || '');
+        return '<tr class="domain-row ' + escapeHtml(domain._row_class || '') + '" data-domain-id="local-' + escapeHtml(domain.id || '') + '" data-domain-name="' + escapeHtml(domain.domain || '') + '">'
+            + '<td><div class="domain-name-wrap">'
+            + '<button type="button" class="btn btn-link btn-sm icon-only status-tooltip subdomain-toggle" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-trigger="hover" data-bs-title="' + escapeHtml(tr('domains.subdomains', 'Subdomains')) + '" data-server-id="' + escapeHtml(domain.server_id || '') + '" data-domain="' + escapeHtml(domain.domain || '') + '" aria-label="' + escapeHtml(tr('domains.subdomains', 'Subdomains')) + '">' + plusIconSvg + '</button>'
+            + '<span class="domain-name-stack"><span class="name-with-status">'
+            + '<span class="domain-name-text">' + escapeHtml(domain.domain || '') + '</span>'
+            + '<span class="domain-status-icons">' + (domain._status_html || '') + '</span>'
+            + '</span><span class="domain-server-hint">' + escapeHtml(domain.server_name || '') + '</span></span>'
+            + '</div></td>'
+            + '<td>' + escapeHtml(formatDisplayDate(domain.registered_at || '')) + '</td>'
+            + '<td>' + escapeHtml(formatDisplayDate(domain.next_billing_at || '')) + '</td>'
+            + '<td>' + escapeHtml(billingFrequencyLabel(domain.billing_frequency || 'yearly')) + '</td>'
+            + '<td>' + escapeHtml(domain.registrar || '') + '</td>'
+            + '</tr><tr class="subdomain-row" id="' + rowId + '" hidden><td colspan="5"><div class="subdomain-box">' + escapeHtml(tr('common.loading', 'Loading...')) + '</div></td></tr>';
+    }).join('');
+    target.innerHTML = '<div class="table-responsive"><table class="table table-sm align-middle mb-0">'
+        + '<thead><tr>'
+        + '<th>' + escapeHtml(tr('nav.domains', 'Domains')) + '</th>'
+        + '<th>' + escapeHtml(tr('domains.registered', 'Registered')) + '</th>'
+        + '<th>' + escapeHtml(tr('domains.next_billing', 'Next billing')) + '</th>'
+        + '<th>' + escapeHtml(tr('billing.interval', 'Interval')) + '</th>'
+        + '<th>' + escapeHtml(tr('domains.registrar', 'Registrar')) + '</th>'
+        + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+    initStatusTooltips(target);
+}
+
+function renderCustomerAccount(form, balance, entries, pendingTotal = '0.00') {
+    const balanceTarget = form.querySelector('[data-customer-account-balance]');
+    if (balanceTarget) {
+        balanceTarget.textContent = formatMoney(balance || '0.00');
+    }
+    const calculatedPendingTotal = (entries || []).reduce((sum, entry) => {
+        const status = String(entry.status || '');
+        if (entry.entry_type !== 'invoice' || !['draft', 'pending_approval', 'failed'].includes(status)) {
+            return sum;
+        }
+        const amount = Number.parseFloat(String(entry.amount || '0').replace(',', '.'));
+        return Number.isFinite(amount) ? sum + Math.abs(amount) : sum;
+    }, 0);
+    const visiblePendingTotal = calculatedPendingTotal > 0
+        ? calculatedPendingTotal.toFixed(2)
+        : pendingTotal;
+    const pendingTarget = form.querySelector('[data-customer-account-pending]');
+    if (pendingTarget) {
+        pendingTarget.textContent = formatMoney(visiblePendingTotal || '0.00');
+    }
+    const target = form.querySelector('[data-customer-account-entries]');
+    if (!target) {
+        return;
+    }
+    if (!entries || entries.length === 0) {
+        target.innerHTML = '<p class="billing-muted">' + escapeHtml(tr('billing.no_customer_account_entries', 'No customer account entries yet.')) + '</p>';
+        return;
+    }
+    const rows = entries.map((entry) => {
+        const isInvoice = entry.entry_type === 'invoice';
+        const status = isInvoice ? String(entry.status || '') : '';
+        const isPending = ['draft', 'pending_approval', 'failed'].includes(status);
+        const typeLabel = tr('billing.account_' + entry.entry_type, entry.entry_type || '');
+        const statusLabel = status ? tr('billing.status_' + status, status) : '';
+        const invoiceTarget = 'invoice-' + String(entry.invoice_number || entry.invoice_id || '').replace(/[^A-Za-z0-9_-]+/g, '_');
+        const typeText = isInvoice && entry.invoice_id
+            ? '<a href="/?invoice_pdf=' + encodeURIComponent(entry.invoice_id) + '" target="' + escapeHtml(invoiceTarget) + '">' + escapeHtml(typeLabel) + '</a>'
+            : escapeHtml(typeLabel);
+        const typeCell = typeText + (statusLabel ? ' (' + escapeHtml(statusLabel) + ')' : '');
+        const marker = isPending
+            ? '<span class="badge text-bg-warning ms-2">' + escapeHtml(tr('billing.account_pending_marker', 'reserved')) + '</span>'
+            : '';
+        const action = isPending && entry.invoice_id
+            ? '<button type="button" class="btn btn-sm btn-outline-success customer-account-invoice-approve" data-invoice-id="' + escapeHtml(entry.invoice_id) + '">' + escapeHtml(tr('billing.approve_only', 'Approve')) + '</button>'
+            : '';
+        return '<tr>'
+            + '<td>' + escapeHtml(formatDisplayDate(String(entry.entry_date || '').slice(0, 10))) + '</td>'
+            + '<td>' + typeCell + marker + '</td>'
+            + '<td>' + escapeHtml(entry.invoice_number || '') + '</td>'
+            + '<td>' + escapeHtml(entry.reference || '') + '</td>'
+            + '<td class="text-end">' + escapeHtml(formatMoney(entry.amount || '0.00')) + '</td>'
+            + '<td class="text-end">' + action + '</td>'
+            + '</tr>';
+    }).join('');
+    target.innerHTML = '<h3 class="h6 mt-4">' + escapeHtml(tr('billing.customer_account_entries', 'Customer account entries')) + '</h3>'
+        + '<div class="table-responsive"><table class="table table-sm align-middle mb-0">'
+        + '<thead><tr>'
+        + '<th>' + escapeHtml(tr('billing.payment_date', 'Payment date')) + '</th>'
+        + '<th>' + escapeHtml(tr('common.type', 'Type')) + '</th>'
+        + '<th>' + escapeHtml(tr('billing.invoice_number', 'Invoice number')) + '</th>'
+        + '<th>' + escapeHtml(tr('billing.payment_reference', 'Reference')) + '</th>'
+        + '<th class="text-end">' + escapeHtml(tr('billing.total', 'Total')) + '</th>'
+        + '<th class="text-end">' + escapeHtml(tr('common.actions', 'Actions')) + '</th>'
+        + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
+
+function fillLocalUserForm(form, user) {
+    clearLocalUserFormError(form);
+    setFormValue(form, 'id', user.id || '');
+    setFormValue(form, 'display_name', user.display_name || user.username || '');
+    setFormValue(form, 'email', user.email || '');
+    setFormValue(form, 'invoice_email', user.invoice_email || '');
+    setFormValue(form, 'customer_number', user.customer_number || '');
+    setFormValue(form, 'company', user.company || '');
+    setFormValue(form, 'first_name', user.first_name || '');
+    setFormValue(form, 'last_name', user.last_name || '');
+    setFormValue(form, 'phone', user.phone || '');
+    setFormValue(form, 'address', user.address || '');
+    setFormValue(form, 'postcode', user.postcode || '');
+    setFormValue(form, 'city', user.city || '');
+    setFormValue(form, 'region', user.region || '');
+    setFormValue(form, 'country', user.country || '');
+    setFormValue(form, 'notes', user.notes || '');
+    const billing = user._billing || {};
+    setFormValue(form, 'billing_discount_percent', billing.discount_percent ?? 0);
+    setFormValue(form, 'billing_invoice_frequency', billing.invoice_frequency || 'monthly');
+    resetBillingItemPanel(form);
+    resetCustomerPaymentPanel(form);
+    renderUserBillingItems(form, user._billing_items || []);
+    renderCustomerAccount(
+        form,
+        user._account_balance || '0.00',
+        user._account_entries || [],
+        user._account_pending_total || '0.00'
+    );
+    renderLocalUserRemotes(form, user._remote_users || []);
+    renderLocalUserDomains(form, user._domains || []);
+    form.querySelector('.nav-link[data-bs-target="#local-user-tab-contact"]')?.click();
+}
+
+function resetCustomerPaymentPanel(form, hide = true) {
+    const panel = form.querySelector('[data-customer-payment-panel]');
+    const paymentAmount = form.querySelector('[data-payment-amount]');
+    const paymentDate = form.querySelector('[data-payment-date]');
+    const paymentReference = form.querySelector('[data-payment-reference]');
+    const paymentNote = form.querySelector('[data-payment-note]');
+    if (paymentAmount) paymentAmount.value = '';
+    if (paymentDate) paymentDate.value = localDateInputValue();
+    if (paymentReference) paymentReference.value = '';
+    if (paymentNote) paymentNote.value = '';
+    panel?.querySelectorAll('.is-invalid').forEach((field) => clearUserFormProblem(field));
+    if (panel && hide) {
+        panel.hidden = true;
+    }
+}
+
+function resetBillingItemPanel(form, hide = true) {
+    const panel = form.querySelector('[data-billing-item-panel]');
+    setFormValue(form, 'billing_item_description', '');
+    setFormValue(form, 'billing_item_amount', '');
+    setFormValue(form, 'billing_item_tax_rate_id', '');
+    setFormValue(form, 'billing_item_booking_date', localDateInputValue());
+    setFormValue(form, 'billing_item_frequency', 'once');
+    setFormValue(form, 'billing_item_active', true);
+    panel?.querySelectorAll('.is-invalid').forEach((field) => clearUserFormProblem(field));
+    if (panel && hide) {
+        panel.hidden = true;
+    }
+}
+
+function wizardSteps(form) {
+    return Array.from(form.querySelectorAll('[data-wizard-step]'));
+}
+
+function setWizardStep(form, index) {
+    const steps = wizardSteps(form);
+    const bounded = Math.max(0, Math.min(index, steps.length - 1));
+    form.dataset.wizardStep = String(bounded);
+    steps.forEach((step, stepIndex) => {
+        step.hidden = stepIndex !== bounded;
+    });
+    const prev = form.querySelector('[data-wizard-prev]');
+    const next = form.querySelector('[data-wizard-next]');
+    const submit = form.querySelector('[data-wizard-submit]');
+    if (prev) {
+        prev.hidden = bounded === 0;
+    }
+    if (next) {
+        next.hidden = bounded === steps.length - 1;
+    }
+    if (submit) {
+        submit.hidden = bounded !== steps.length - 1;
+    }
+}
+
+function localUserContactPreview(user) {
+    const parts = [
+        user.company,
+        [user.first_name, user.last_name].filter(Boolean).join(' '),
+        user.email,
+        user.address,
+        [user.postcode, user.city].filter(Boolean).join(' '),
+        user.country,
+    ].filter(Boolean);
+    return parts.length ? parts.join('<br>') : tr('users.no_contact_data', 'No contact details stored.');
+}
+
+function applyWizardContact(form) {
+    let user = {};
+    try {
+        user = JSON.parse(form.dataset.localUserJson || '{}') || {};
+    } catch (error) {
+        user = {};
+    }
+    const inherit = form.querySelector('[data-wizard-inherit-contact]')?.checked;
+    const fields = ['first_name', 'last_name', 'company', 'phone', 'address', 'postcode', 'city', 'region', 'country', 'customer_number', 'notes'];
+    fields.forEach((field) => setFormValue(form, field, inherit ? (user[field] || '') : ''));
+    if (inherit) {
+        setFormValue(form, 'email', user.email || '');
+    }
+    const preview = form.querySelector('[data-wizard-contact-preview]');
+    if (preview) {
+        preview.innerHTML = inherit
+            ? localUserContactPreview(user)
+            : escapeHtml(tr('users.wizard_contact_not_inherited', 'Contact details will not be copied.'));
+    }
+}
+
+function openRemoteUserWizard(form, localUser) {
+    form.reset();
+    form.dataset.localUserJson = JSON.stringify(localUser || {});
+    setFormValue(form, 'local_user_id', localUser.id || '');
+    setFormValue(form, 'username', (localUser.username || localUser.display_name || '').toLowerCase().replace(/[^a-z0-9._-]+/g, '_').replace(/^_+|_+$/g, ''));
+    setFormValue(form, 'email', localUser.email || '');
+    const password = generatePassword(20);
+    setFormValue(form, 'password', password);
+    setFormValue(form, 'password_confirmation', password);
+    const serverField = form.querySelector('[data-wizard-server-id]');
+    const selectedServer = form.querySelector('[data-wizard-server-option]:checked')?.value || serverField?.value || '';
+    filterHostingPlansForServer(form, selectedServer);
+    applyWizardContact(form);
+    setUsernameStatus(form, '', '');
+    form.querySelectorAll('[data-resource-unlimited]').forEach((checkbox) => applyResourceUnlimited(checkbox));
+    applyPermissionResourceLocks(form);
+    setWizardStep(form, 0);
+    void ensureWizardUsernameAvailable(form);
+}
+
+function validateWizardStep(form) {
+    const steps = wizardSteps(form);
+    const index = Number(form.dataset.wizardStep || 0);
+    const step = steps[index];
+    if (!step) {
+        return true;
+    }
+    if (step.dataset.wizardStep === 'server' && !form.querySelector('[name="server_id"]:checked')) {
+        showToast(tr('users.server_required', 'Please select a server.'), 'error');
+        return false;
+    }
+    return true;
+}
+
 function clearUserFormProblem(field) {
     field.classList.remove('is-invalid');
 }
@@ -866,6 +1145,27 @@ function showUserFormProblem(form, field, message) {
         field.scrollIntoView({ block: 'center', behavior: 'smooth' });
         field.focus({ preventScroll: true });
     }, 80);
+    showToast(message, 'error');
+}
+
+function clearLocalUserFormError(form) {
+    const alert = form.querySelector('[data-local-user-form-error]');
+    if (!alert) {
+        return;
+    }
+    alert.hidden = true;
+    alert.textContent = '';
+}
+
+function showLocalUserFormError(form, message) {
+    const alert = form.querySelector('[data-local-user-form-error]');
+    if (!alert) {
+        showToast(message, 'error');
+        return;
+    }
+    alert.textContent = message;
+    alert.hidden = false;
+    alert.scrollIntoView({ block: 'nearest' });
     showToast(message, 'error');
 }
 
@@ -905,7 +1205,7 @@ function confirmPastBillingDate(form) {
         showUserFormProblem(form, bookingDate, tr('billing.booking_date_invalid', 'The booking date is invalid.'));
         return false;
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDateInputValue();
     if (value >= today) {
         return true;
     }
@@ -925,7 +1225,10 @@ function confirmPastBillingDate(form) {
 
 async function checkUsernameAvailability(form) {
     const input = form.querySelector('[data-username-input]');
-    const serverId = form.querySelector('[data-user-create-server-id]')?.value || '';
+    const serverId = form.querySelector('[data-user-create-server-id]')?.value
+        || form.querySelector('[name="server_id"]:checked')?.value
+        || form.querySelector('[data-wizard-server-id]')?.value
+        || '';
     const username = input?.value.trim() || '';
     if (!username || !serverId) {
         setUsernameStatus(form, '', '');
@@ -945,12 +1248,49 @@ async function checkUsernameAvailability(form) {
     }
 }
 
+async function checkUsernameCandidate(form, serverId, username) {
+    const body = new FormData();
+    body.set('_ajax', '1');
+    body.set('_action', 'check_username');
+    body.set('server_id', serverId);
+    body.set('username', username);
+    return postAjax(body);
+}
+
+async function ensureWizardUsernameAvailable(form) {
+    const input = form.querySelector('[data-username-input]');
+    const serverId = form.querySelector('[name="server_id"]:checked')?.value
+        || form.querySelector('[data-wizard-server-id]')?.value
+        || '';
+    const baseUsername = input?.value.trim() || '';
+    if (!input || !serverId || !baseUsername) {
+        setUsernameStatus(form, '', '');
+        return;
+    }
+    setUsernameStatus(form, tr('js.username_checking', 'Checking username...'), 'pending');
+    try {
+        for (let number = 0; number <= 99; number += 1) {
+            const candidate = number === 0 ? baseUsername : baseUsername + String(number);
+            const data = await checkUsernameCandidate(form, serverId, candidate);
+            if (data.available) {
+                input.value = candidate;
+                setUsernameStatus(form, data.message || tr('message.username_available', 'Username is available.'), 'ok');
+                return;
+            }
+        }
+        setUsernameStatus(form, tr('message.username_suggestion_failed', 'No available username could be generated.'), 'error');
+    } catch (error) {
+        setUsernameStatus(form, error.message, 'error');
+    }
+}
+
 initHelpPopovers();
 initStatusTooltips();
 initInvoiceTemplatePreviews();
 initBackbillDomainForm();
 
 const puttyIconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-putty" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2.5A1.5 1.5 0 0 1 3.5 1h9A1.5 1.5 0 0 1 14 2.5v6A1.5 1.5 0 0 1 12.5 10H9v1.5h2.5a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1H7V10H3.5A1.5 1.5 0 0 1 2 8.5zM3.5 2a.5.5 0 0 0-.5.5v6a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-6a.5.5 0 0 0-.5-.5z"/><path d="M4.646 4.146a.5.5 0 0 1 .708 0L7.207 6 5.354 7.854a.5.5 0 1 1-.708-.708L5.793 6 4.646 4.854a.5.5 0 0 1 0-.708M7.5 7.5A.5.5 0 0 1 8 7h2.5a.5.5 0 0 1 0 1H8a.5.5 0 0 1-.5-.5"/></svg>';
+const plusIconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-plus" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2"/></svg>';
 const rebootIconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-reboot" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/><path d="M7.5 6.5h1v4h-1z"/></svg>';
 
 const refreshIconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-clockwise" viewBox="0 0 16 16" aria-hidden="true"><path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/></svg>';
@@ -1667,6 +2007,219 @@ document.addEventListener('click', (event) => {
     fillUserForm(form, user);
 });
 
+document.addEventListener('click', (event) => {
+    const button = event.target.closest('.local-user-edit-open');
+    if (!button) {
+        return;
+    }
+    const row = button.closest('[data-local-user-row]');
+    const form = document.querySelector('.ajax-local-user-form');
+    if (!row || !form) {
+        return;
+    }
+    let user = {};
+    try {
+        user = JSON.parse(row.dataset.localUserJson || '{}') || {};
+    } catch (error) {
+        user = {};
+    }
+    form.reset();
+    fillLocalUserForm(form, user);
+});
+
+document.addEventListener('click', (event) => {
+    const button = event.target.closest('.remote-user-wizard-open');
+    if (!button) {
+        return;
+    }
+    const row = button.closest('[data-local-user-row]');
+    const form = document.querySelector('.ajax-remote-user-wizard-form');
+    if (!row || !form) {
+        return;
+    }
+    let user = {};
+    try {
+        user = JSON.parse(row.dataset.localUserJson || '{}') || {};
+    } catch (error) {
+        user = {};
+    }
+    openRemoteUserWizard(form, user);
+});
+
+async function replaceUsersContent(data) {
+    const area = document.querySelector('[data-user-import-area]');
+    const content = area?.querySelector('[data-users-content]');
+    if (content && data.html) {
+        content.outerHTML = data.html;
+        initStatusTooltips(area || document);
+    }
+}
+
+function setRemoteAssignmentEditing(cell, editing) {
+    const display = cell?.querySelector('[data-remote-assignment-display]');
+    const editor = cell?.querySelector('.remote-assignment-editor');
+    if (!display || !editor) {
+        return;
+    }
+    display.hidden = editing;
+    editor.hidden = !editing;
+    if (editing) {
+        editor.querySelector('select')?.focus();
+    }
+}
+
+document.addEventListener('dblclick', (event) => {
+    const display = event.target.closest('[data-remote-assignment-display]');
+    if (!display) {
+        return;
+    }
+    setRemoteAssignmentEditing(display.closest('.remote-assignment-cell'), true);
+});
+
+document.addEventListener('click', (event) => {
+    const button = event.target.closest('.remote-assignment-cancel');
+    if (!button) {
+        return;
+    }
+    const cell = button.closest('.remote-assignment-cell');
+    const select = cell?.querySelector('select[name="local_user_id"]');
+    if (select && cell) {
+        select.value = cell.dataset.currentLocalUserId || '';
+    }
+    setRemoteAssignmentEditing(cell, false);
+});
+
+document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-local-user-create-toggle]');
+    if (!button) {
+        return;
+    }
+    const section = button.closest('.server-user-group');
+    const panel = section?.querySelector('[data-local-user-create-panel]');
+    if (!panel) {
+        return;
+    }
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden) {
+        panel.querySelector('input[name="display_name"]')?.focus();
+    }
+});
+
+document.addEventListener('submit', async (event) => {
+    const form = event.target.closest('.ajax-local-user-create-form, .ajax-remote-assignment-form');
+    if (!form) {
+        return;
+    }
+    event.preventDefault();
+    const button = document.querySelector('button[form="' + CSS.escape(form.id || '') + '"]') || form.querySelector('button[type="submit"]');
+    if (button) {
+        button.disabled = true;
+    }
+    try {
+        const data = await postAjax(new FormData(form));
+        await replaceUsersContent(data);
+        showToast(data.message || tr('js.user_updated', 'Users updated.'));
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+        }
+    }
+});
+
+document.addEventListener('click', async (event) => {
+    const button = event.target.closest('.local-user-create-from-remote');
+    if (!button) {
+        return;
+    }
+    const name = button.dataset.remoteUserName || '';
+    const question = tr('users.confirm_create_local_from_remote', 'Create a local user from {name}?').replace('{name}', name);
+    if (!window.confirm(question)) {
+        return;
+    }
+    const body = new FormData();
+    body.set('_action', 'create_local_user_from_remote');
+    body.set('remote_user_id', button.dataset.remoteUserId || '');
+    body.set('remote_user_name', name);
+    button.disabled = true;
+    try {
+        const data = await postAjax(body);
+        await replaceUsersContent(data);
+        showToast(data.message || tr('js.user_updated', 'Users updated.'));
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
+
+document.addEventListener('click', async (event) => {
+    const button = event.target.closest('.local-user-delete');
+    if (!button) {
+        return;
+    }
+    const name = button.dataset.localUserName || '';
+    const question = tr('users.confirm_delete_local_user', 'Delete local user {name}?').replace('{name}', name);
+    if (!window.confirm(question)) {
+        return;
+    }
+    const body = new FormData();
+    body.set('_action', 'delete_local_user');
+    body.set('id', button.dataset.localUserId || '');
+    button.disabled = true;
+    try {
+        const data = await postAjax(body);
+        await replaceUsersContent(data);
+        showToast(data.message || tr('message.local_user_deleted', 'Local user deleted.'));
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
+
+document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-wizard-next], [data-wizard-prev]');
+    if (!button) {
+        return;
+    }
+    const form = button.closest('.ajax-remote-user-wizard-form');
+    if (!form) {
+        return;
+    }
+    const current = Number(form.dataset.wizardStep || 0);
+    if (button.matches('[data-wizard-next]')) {
+        if (!validateWizardStep(form)) {
+            return;
+        }
+        setWizardStep(form, current + 1);
+        if (wizardSteps(form)[Number(form.dataset.wizardStep || 0)]?.dataset.wizardStep === 'plan') {
+            void ensureWizardUsernameAvailable(form);
+        }
+        return;
+    }
+    setWizardStep(form, current - 1);
+});
+
+document.addEventListener('change', (event) => {
+    const server = event.target.closest('.ajax-remote-user-wizard-form [name="server_id"]');
+    if (!server) {
+        return;
+    }
+    const form = server.closest('form');
+    filterHostingPlansForServer(form, server.value || '');
+    void ensureWizardUsernameAvailable(form);
+});
+
+document.addEventListener('change', (event) => {
+    const checkbox = event.target.closest('[data-wizard-inherit-contact]');
+    if (!checkbox) {
+        return;
+    }
+    applyWizardContact(checkbox.closest('form'));
+});
+
 document.addEventListener('change', (event) => {
     const checkbox = event.target.closest('[data-resource-unlimited]');
     if (!checkbox) {
@@ -1714,7 +2267,7 @@ document.addEventListener('click', (event) => {
     if (!button) {
         return;
     }
-    const form = button.closest('.ajax-user-create-form');
+    const form = button.closest('.ajax-user-create-form, .ajax-remote-user-wizard-form');
     const password = generatePassword(20);
     form.querySelector('[name="password"]').value = password;
     form.querySelector('[name="password_confirmation"]').value = password;
@@ -1725,7 +2278,7 @@ document.addEventListener('input', (event) => {
     if (!input) {
         return;
     }
-    const form = input.closest('.ajax-user-create-form');
+    const form = input.closest('.ajax-user-create-form, .ajax-remote-user-wizard-form');
     clearTimeout(usernameCheckTimer);
     setUsernameStatus(form, tr('js.username_checking', 'Checking username...'), 'pending');
     usernameCheckTimer = setTimeout(() => checkUsernameAvailability(form), 350);
@@ -1736,8 +2289,11 @@ document.addEventListener('click', async (event) => {
     if (!button) {
         return;
     }
-    const form = button.closest('.ajax-user-create-form');
-    const serverId = form.querySelector('[data-user-create-server-id]')?.value || '';
+    const form = button.closest('.ajax-user-create-form, .ajax-remote-user-wizard-form');
+    const serverId = form.querySelector('[data-user-create-server-id]')?.value
+        || form.querySelector('[name="server_id"]:checked')?.value
+        || form.querySelector('[data-wizard-server-id]')?.value
+        || '';
     const input = form.querySelector('[data-username-input]');
     const body = new FormData();
     body.set('_ajax', '1');
@@ -1812,14 +2368,305 @@ document.addEventListener('submit', async (event) => {
     }
 });
 
+document.addEventListener('submit', async (event) => {
+    const form = event.target.closest('.ajax-remote-user-wizard-form');
+    if (!form) {
+        return;
+    }
+    event.preventDefault();
+    if (!validateWizardStep(form)) {
+        return;
+    }
+    if (!validateUserFormBasics(form, false)) {
+        return;
+    }
+    const password = form.querySelector('[name="password"]')?.value || '';
+    const confirmation = form.querySelector('[name="password_confirmation"]')?.value || '';
+    if (password !== confirmation) {
+        showToast(tr('js.passwords_do_not_match', 'Passwords do not match.'), 'error');
+        return;
+    }
+    await checkUsernameAvailability(form);
+    if (form.querySelector('[data-username-input]')?.dataset.usernameAvailable !== '1') {
+        showToast(tr('js.username_not_available', 'Username is not available.'), 'error');
+        return;
+    }
+    applyWizardContact(form);
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+        const data = await postAjax(formDataWithDisabledFields(form));
+        await replaceUsersContent(data);
+        window.bootstrap?.Modal?.getInstance(form.closest('.modal'))?.hide();
+        showToast(data.message || tr('js.user_created', 'User created.'));
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
+
+document.addEventListener('submit', async (event) => {
+    const form = event.target.closest('.ajax-local-user-form');
+    if (!form) {
+        return;
+    }
+    event.preventDefault();
+    const button = form.querySelector('button[type="submit"]');
+    if (String(form.querySelector('[name="display_name"]')?.value || '').trim() === '') {
+        showToast(tr('users.local_user_required', 'Please select a local user.'), 'error');
+        return;
+    }
+    clearLocalUserFormError(form);
+    if (!confirmPastBillingDate(form)) {
+        return;
+    }
+    if (form.querySelector('[data-sync-remote-contacts]')?.checked) {
+        const question = tr('users.confirm_sync_contact_to_remote_users', 'Transfer these contact details to all assigned remote users?');
+        if (!window.confirm(question)) {
+            return;
+        }
+    }
+    button.disabled = true;
+    try {
+        const data = await postAjax(new FormData(form));
+        await replaceUsersContent(data);
+        if (data.items) {
+            renderUserBillingItems(form, data.items || []);
+        }
+        window.bootstrap?.Modal?.getInstance(form.closest('.modal'))?.hide();
+        showToast(data.message || tr('js.user_updated', 'User updated.'));
+    } catch (error) {
+        showLocalUserFormError(form, error.message);
+    } finally {
+        button.disabled = false;
+    }
+});
+
+document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-customer-payment-toggle]');
+    if (!button) {
+        return;
+    }
+    const form = button.closest('.ajax-local-user-form');
+    const panel = form?.querySelector('[data-customer-payment-panel]');
+    if (!panel) {
+        return;
+    }
+    const willOpen = panel.hidden;
+    resetBillingItemPanel(form);
+    if (!willOpen) {
+        resetCustomerPaymentPanel(form);
+        return;
+    }
+    resetCustomerPaymentPanel(form, false);
+    panel.hidden = false;
+    if (!panel.hidden) {
+        form.querySelector('[data-payment-amount]')?.focus();
+    }
+});
+
+document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-customer-payment-cancel]');
+    if (!button) {
+        return;
+    }
+    const form = button.closest('.ajax-local-user-form');
+    if (!form) {
+        return;
+    }
+    clearLocalUserFormError(form);
+    resetCustomerPaymentPanel(form);
+});
+
+document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-billing-item-toggle]');
+    if (!button) {
+        return;
+    }
+    const form = button.closest('.ajax-local-user-form');
+    const panel = form?.querySelector('[data-billing-item-panel]');
+    if (!panel) {
+        return;
+    }
+    const willOpen = panel.hidden;
+    resetCustomerPaymentPanel(form);
+    if (!willOpen) {
+        resetBillingItemPanel(form);
+        return;
+    }
+    resetBillingItemPanel(form, false);
+    panel.hidden = false;
+    if (!panel.hidden) {
+        form.querySelector('[name="billing_item_description"]')?.focus();
+    }
+});
+
+document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-billing-item-cancel]');
+    if (!button) {
+        return;
+    }
+    const form = button.closest('.ajax-local-user-form');
+    if (!form) {
+        return;
+    }
+    clearLocalUserFormError(form);
+    resetBillingItemPanel(form);
+});
+
+document.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-local-user-billing-run]');
+    if (!button) {
+        return;
+    }
+    const form = button.closest('.ajax-local-user-form');
+    if (!form) {
+        return;
+    }
+    clearLocalUserFormError(form);
+    resetCustomerPaymentPanel(form);
+    resetBillingItemPanel(form);
+    const body = new FormData();
+    body.set('_action', 'billing_run_local_user');
+    body.set('user_id', form.querySelector('[data-local-user-id]')?.value || '');
+    button.disabled = true;
+    try {
+        const data = await postAjax(body);
+        if (data.account) {
+            renderCustomerAccount(
+                form,
+                data.account.balance || '0.00',
+                data.account.entries || [],
+                data.account.pending_total || '0.00'
+            );
+        }
+        renderUserBillingItems(form, data.items || []);
+        await replaceUsersContent(data);
+        showToast(data.message || tr('billing.user_run_finished', 'Billing run finished.'));
+    } catch (error) {
+        showLocalUserFormError(form, error.message);
+    } finally {
+        button.disabled = false;
+    }
+});
+
+document.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-billing-item-submit]');
+    if (!button) {
+        return;
+    }
+    const form = button.closest('.ajax-local-user-form');
+    if (!form) {
+        return;
+    }
+    clearLocalUserFormError(form);
+    const description = form.querySelector('[name="billing_item_description"]');
+    if (!description || String(description.value || '').trim() === '') {
+        if (description) {
+            showUserFormProblem(form, description, tr('js.required_field_missing_named', 'Please fill in: {field}.').replace('{field}', tr('billing.item_description', 'Description')));
+        } else {
+            showToast(tr('billing.item_description_required', 'Please enter a description.'), 'error');
+        }
+        return;
+    }
+    if (!confirmPastBillingDate(form)) {
+        return;
+    }
+    button.disabled = true;
+    try {
+        const data = await postAjax(new FormData(form));
+        await replaceUsersContent(data);
+        renderUserBillingItems(form, data.items || []);
+        resetBillingItemPanel(form);
+        showToast(data.message || tr('message.local_user_updated', 'Local user updated.'));
+    } catch (error) {
+        showLocalUserFormError(form, error.message);
+    } finally {
+        button.disabled = false;
+    }
+});
+
+document.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-customer-payment-submit]');
+    if (!button) {
+        return;
+    }
+    const form = button.closest('.ajax-local-user-form');
+    if (!form) {
+        return;
+    }
+    clearLocalUserFormError(form);
+    const body = new FormData();
+    body.set('_action', 'billing_customer_payment');
+    body.set('user_id', form.querySelector('[data-local-user-id]')?.value || '');
+    body.set('payment_amount', form.querySelector('[data-payment-amount]')?.value || '');
+    body.set('paid_at', form.querySelector('[data-payment-date]')?.value || '');
+    body.set('payment_reference', form.querySelector('[data-payment-reference]')?.value || '');
+    body.set('payment_note', form.querySelector('[data-payment-note]')?.value || '');
+    button.disabled = true;
+    try {
+        const data = await postAjax(body);
+        if (data.account) {
+            renderCustomerAccount(
+                form,
+                data.account.balance || '0.00',
+                data.account.entries || [],
+                data.account.pending_total || '0.00'
+            );
+        }
+        resetCustomerPaymentPanel(form);
+        await replaceUsersContent(data);
+        showToast(data.message || tr('billing.customer_payment_saved', 'Payment saved.'));
+    } catch (error) {
+        showLocalUserFormError(form, error.message);
+    } finally {
+        button.disabled = false;
+    }
+});
+
+document.addEventListener('click', async (event) => {
+    const button = event.target.closest('.customer-account-invoice-approve');
+    if (!button) {
+        return;
+    }
+    const form = button.closest('.ajax-local-user-form');
+    if (!form) {
+        return;
+    }
+    const body = new FormData();
+    body.set('_action', 'billing_invoice_approve');
+    body.set('invoice_id', button.dataset.invoiceId || '');
+    body.set('user_id', form.querySelector('[data-local-user-id]')?.value || '');
+    button.disabled = true;
+    try {
+        const data = await postAjax(body);
+        if (data.account) {
+            renderCustomerAccount(
+                form,
+                data.account.balance || '0.00',
+                data.account.entries || [],
+                data.account.pending_total || '0.00'
+            );
+        }
+        await replaceUsersContent(data);
+        showToast(data.message || tr('billing.invoice_approved', 'Invoice approved.'));
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
+
 document.addEventListener('click', async (event) => {
     const button = event.target.closest('.billing-item-delete');
     if (!button) {
         return;
     }
-    const form = button.closest('.ajax-user-create-form');
+    const form = button.closest('.ajax-user-create-form, .ajax-local-user-form');
     const itemId = button.dataset.billingItemId || '';
     const userId = form?.querySelector('[data-user-create-local-id]')?.value || '';
+    const localUserId = form?.querySelector('[data-local-user-id]')?.value || '';
     if (!form || !itemId) {
         return;
     }
@@ -1831,6 +2678,7 @@ document.addEventListener('click', async (event) => {
     body.set('_action', 'delete_billing_user_item');
     body.set('id', itemId);
     body.set('user_id', userId);
+    body.set('local_user_id', localUserId);
     button.disabled = true;
     try {
         const data = await postAjax(body);
@@ -1928,6 +2776,7 @@ function fillDomainSettingsForm(form, row) {
     setFormValue(form, 'billing_frequency', domain.billing_frequency || 'yearly');
     setFormValue(form, 'last_change_at', (domain.last_change_at || '').slice(0, 10));
     setFormValue(form, 'registrar', domain.registrar || '');
+    setFormValue(form, 'local_user_id', domain.local_user_id || '');
     setFormValue(form, 'yearly_price', override.yearly_price ?? '');
     setFormValue(form, 'discount_percent', override.discount_percent ?? '');
     setFormValue(form, 'registration_price', override.registration_price ?? '');
@@ -2011,8 +2860,10 @@ document.addEventListener('click', async (event) => {
     try {
         const data = await postAjax(body);
         if (data.status === 'deleted') {
-            document.getElementById('subdomains-' + domainId)?.remove();
-            row.remove();
+            if (data.domain) {
+                applyDomainData(row, data.domain, data.row_class, data.status_html);
+                updateDomainRowDataset(row, data.domain);
+            }
             updateDuplicateClasses(domainName);
             showToast(data.message || tr('js.domain_deleted', 'Domain deleted locally.'));
             return;
@@ -2027,6 +2878,27 @@ document.addEventListener('click', async (event) => {
     } finally {
         button.disabled = false;
         button.classList.remove('loading');
+    }
+});
+
+document.addEventListener('click', (event) => {
+    const button = event.target.closest('.invoice-payment-open');
+    if (!button) {
+        return;
+    }
+    const form = document.querySelector('.invoice-payment-form');
+    if (!form) {
+        return;
+    }
+    form.reset();
+    setFormValue(form, 'user_id', button.dataset.userId || '');
+    setFormValue(form, 'payment_amount', button.dataset.openTotal || '');
+    setFormValue(form, 'paid_at', localDateInputValue());
+    setFormValue(form, 'payment_reference', button.dataset.invoiceNumber || '');
+    setFormValue(form, 'payment_note', '');
+    const label = form.querySelector('[data-payment-invoice-label]');
+    if (label) {
+        label.textContent = button.dataset.invoiceNumber || '';
     }
 });
 

@@ -21,6 +21,17 @@
                             <label class="form-label"><?= h(t('users.username')) ?><div class="input-group"><input class="form-control" name="username" required data-username-input><button class="btn btn-outline-secondary icon-only status-tooltip" type="button" data-username-suggest<?= icon_button_attrs(t('users.suggest_username')) ?>><?= icon_svg('refresh') ?></button></div><small class="form-text" data-username-status></small></label>
                             <label class="form-label"><?= h(t('common.language')) ?><select class="form-select" name="language"><option value="de">Deutsch - German</option><option value="en">English</option><option value="es">Español - Spanish</option><option value="fr">Français - French</option><option value="it">Italiano - Italian</option><option value="nl">Nederlands - Dutch</option><option value="pl">Polski - Polish</option><option value="pt">Português - Portuguese</option><option value="sv">Svenska - Swedish</option><option value="tr">Türkçe - Turkish</option><option value="ru">Russian - Russian</option><option value="ar">Arabic - Arabic</option><option value="zh_CN">Chinese simplified</option><option value="zh_TW">Chinese traditional</option></select></label>
                             <label class="form-label"><?= h(t('users.email')) ?><input class="form-control" name="email" type="email" required></label>
+                            <label class="form-label">
+                                <?= h(t('users.local_user')) ?>
+                                <select class="form-select" name="local_user_id">
+                                    <option value=""><?= h(t('common.unknown')) ?></option>
+                                    <?php foreach (($localUsers ?? []) as $localUser): ?>
+                                    <option value="<?= (int)$localUser['id'] ?>">
+                                        <?= h($localUser['username'] ?? '') ?>
+                                    </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </label>
                             <label class="form-label"><?= h(t('users.password')) ?><div class="input-group"><input class="form-control" name="password" type="password" autocomplete="new-password" required><button class="btn btn-outline-secondary" type="button" data-password-generate><?= h(t('users.generate_password')) ?></button></div></label>
                             <label class="form-label"><?= h(t('users.password_confirm')) ?><input class="form-control" name="password_confirmation" type="password" autocomplete="new-password" required></label>
                             <label class="form-label"><?= h(t('users.notes')) ?><textarea class="form-control" name="notes" rows="3"></textarea></label>
@@ -48,7 +59,7 @@
                                 <label class="form-label">
                                     <?= h(t('billing.invoice_frequency')) ?>
                                     <select class="form-select" name="billing_invoice_frequency">
-                                        <option value="instant"><?= h(t('billing.frequency_instant')) ?></option>
+                                        <option value="immediate"><?= h(t('billing.frequency_instant')) ?></option>
                                         <option value="weekly"><?= h(t('billing.frequency_weekly')) ?></option>
                                         <option value="monthly" selected><?= h(t('billing.frequency_monthly')) ?></option>
                                     </select>

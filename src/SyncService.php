@@ -116,6 +116,11 @@ final class SyncService
         }
         $this->applyTemporaryHostingPlan($client, $externalId, $data, (string)($data['username'] ?? ''));
         $this->importUsers($serverId);
+        $localUserId = (int)($data['local_user_id'] ?? 0);
+        $remoteUser = $this->repo->userByExternalId($serverId, $externalId);
+        if ($localUserId > 0 && $remoteUser) {
+            $this->repo->assignRemoteUserToLocalUser((int)$remoteUser['id'], $localUserId);
+        }
         return t('message.user_created', ['name' => ($data['username'] ?? t('common.unknown'))]);
     }
 
@@ -139,6 +144,43 @@ final class SyncService
         $this->applyTemporaryHostingPlan($client, (string)$user['external_id'], $data, (string)($user['username'] ?? ''));
         $this->importUsers((int)$user['server_id']);
         return t('message.user_updated', ['name' => ($user['username'] ?? t('common.unknown'))]);
+    }
+
+    public function syncLocalContactToRemoteUsers(int $localUserId): int
+    {
+        $localUser = $this->repo->localUser($localUserId);
+        if (!$localUser) {
+            throw new RuntimeException(t('message.user_not_found'));
+        }
+        $count = 0;
+        foreach (($this->repo->remoteUsersByLocalUserId()[$localUserId] ?? []) as $remoteUser) {
+            $server = $this->repo->server((int)$remoteUser['server_id']);
+            if (!$server) {
+                throw new RuntimeException(t('message.server_not_found'));
+            }
+            $raw = json_decode((string)($remoteUser['raw_json'] ?? '{}'), true) ?: [];
+            $payload = [
+                'username' => (string)$remoteUser['username'],
+                'language' => (string)($raw['language'] ?? 'de'),
+                'email' => (string)($localUser['email'] ?? $remoteUser['email'] ?? ''),
+                'notes' => (string)($localUser['notes'] ?? ''),
+                'contact_data' => [
+                    'first_name' => (string)($localUser['first_name'] ?? ''),
+                    'last_name' => (string)($localUser['last_name'] ?? ''),
+                    'company' => (string)($localUser['company'] ?? ''),
+                    'telephone' => (string)($localUser['phone'] ?? ''),
+                    'address' => (string)($localUser['address'] ?? ''),
+                    'city' => (string)($localUser['city'] ?? ''),
+                    'zip' => (string)($localUser['postcode'] ?? ''),
+                    'state' => (string)($localUser['region'] ?? ''),
+                    'country' => (string)($localUser['country'] ?? ''),
+                    'client_id' => (string)($localUser['customer_number'] ?? ''),
+                ],
+            ];
+            (new KeyHelpClient($this->config, $server))->updateUser((string)$remoteUser['external_id'], $payload);
+            $count++;
+        }
+        return $count;
     }
 
     public function createHostingPackage(array $data): string
@@ -729,10 +771,12 @@ final class SyncService
         }
 
         if ($freshDomain === null) {
-            $this->repo->deleteDomain($domainId);
+            $this->repo->markDomainDeleted($domainId);
+            $deletedDomain = $this->repo->domain($domainId);
             return [
                 'status' => 'deleted',
                 'message' => t('message.domain_deleted', ['name' => ($targetName ?: t('common.unknown'))]),
+                'domain' => $deletedDomain,
             ];
         }
 

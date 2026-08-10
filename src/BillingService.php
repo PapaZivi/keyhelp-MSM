@@ -89,11 +89,67 @@ final class BillingService
         }
     }
 
+    public function runForUser(int $userId, string $actor = 'system'): string
+    {
+        $user = $this->repo->localUser($userId);
+        if (!$user) {
+            throw new InvalidArgumentException(t('billing.user_required'));
+        }
+        if (!$this->repo->acquireBillingLock()) {
+            throw new RuntimeException(t('billing.locked'));
+        }
+        try {
+            $now = new DateTimeImmutable('now');
+            $lastRun = new DateTimeImmutable($this->repo->billingLastRunAt());
+            $createdInvoices = 0;
+            $queuedItems = 0;
+            $this->repo->transaction(function () use ($user, $userId, $lastRun, $now, $actor, &$createdInvoices, &$queuedItems): void {
+                $queuedItems += $this->queueDueDomainItems($lastRun, $now, $userId);
+                $queuedItems += $this->queueDueUserItems($now, $userId);
+                $invoice = $this->createInvoiceFromPendingItems($user, $lastRun, $now, $actor, true);
+                if ($invoice) {
+                    $settings = $this->repo->billingUserSetting($userId);
+                    $this->repo->updateUserInvoiceSchedule($userId, $settings['invoice_frequency'] ?? 'monthly', $now);
+                    $createdInvoices = 1;
+                }
+            });
+            $message = t('billing.user_run_result', [
+                'user' => $user['display_name'] ?? $user['username'] ?? ('#' . $userId),
+                'invoices' => $createdInvoices,
+                'items' => $queuedItems,
+            ]);
+            $this->repo->audit($actor, 'billing_user_run_finished', 'local_user', $userId, [
+                'invoices' => $createdInvoices,
+                'items' => $queuedItems,
+            ]);
+            return $message;
+        } catch (Throwable $e) {
+            $this->repo->audit($actor, 'billing_user_run_failed', 'local_user', $userId, ['error' => $e->getMessage()]);
+            throw $e;
+        } finally {
+            $this->repo->releaseBillingLock();
+        }
+    }
+
     public function approveAndSend(int $invoiceId, string $actor = 'admin'): string
     {
         $this->repo->setInvoiceStatus($invoiceId, 'approved');
         $this->repo->audit($actor, 'invoice_approved', 'invoice', $invoiceId);
         return $this->sendInvoice($invoiceId, $actor);
+    }
+
+    public function approveInvoice(int $invoiceId, string $actor = 'admin'): string
+    {
+        $invoice = $this->repo->invoice($invoiceId);
+        if (!$invoice) {
+            throw new RuntimeException(t('billing.invoice_not_found'));
+        }
+        if (in_array((string)$invoice['status'], ['sent', 'cancelled'], true)) {
+            throw new RuntimeException(t('billing.invoice_approve_not_allowed'));
+        }
+        $this->repo->setInvoiceStatus($invoiceId, 'approved');
+        $this->repo->audit($actor, 'invoice_approved', 'invoice', $invoiceId);
+        return t('billing.invoice_approved');
     }
 
     public function queueInvoice(int $invoiceId, string $actor = 'admin'): string
@@ -184,10 +240,56 @@ final class BillingService
         return t('billing.invoice_sent');
     }
 
+    public function markInvoicePaid(int $invoiceId, array $data, string $actor = 'admin'): string
+    {
+        $invoice = $this->repo->invoice($invoiceId);
+        if (!$invoice) {
+            throw new RuntimeException(t('billing.invoice_not_found'));
+        }
+        $paidAt = $this->dateOnly($data['paid_at'] ?? null);
+        if (!$paidAt) {
+            throw new InvalidArgumentException(t('billing.payment_date_required'));
+        }
+        $reference = trim((string)($data['payment_reference'] ?? ''));
+        $note = trim((string)($data['payment_note'] ?? ''));
+        $this->repo->markInvoicePaid($invoiceId, $paidAt->format('Y-m-d'), $reference, $note);
+        $this->repo->audit($actor, 'invoice_paid', 'invoice', $invoiceId, [
+            'invoice_number' => $invoice['invoice_number'] ?? '',
+            'paid_at' => $paidAt->format('Y-m-d'),
+            'reference' => $reference,
+        ]);
+        return t('billing.invoice_paid_saved');
+    }
+
+    public function recordCustomerPayment(int $userId, array $data, string $actor = 'admin'): string
+    {
+        $user = $this->repo->localUser($userId);
+        if (!$user) {
+            throw new InvalidArgumentException(t('billing.user_required'));
+        }
+        $paidAt = $this->dateOnly($data['paid_at'] ?? null);
+        if (!$paidAt) {
+            throw new InvalidArgumentException(t('billing.payment_date_required'));
+        }
+        $result = $this->repo->recordCustomerPayment(
+            $userId,
+            $paidAt->format('Y-m-d'),
+            $data['payment_amount'] ?? 0,
+            trim((string)($data['payment_reference'] ?? '')),
+            trim((string)($data['payment_note'] ?? ''))
+        );
+        $this->repo->audit($actor, 'customer_payment_recorded', 'user', $userId, $result);
+        return t('billing.customer_payment_saved', [
+            'paid' => (string)$result['paid_invoices'],
+            'partial' => (string)$result['partial_invoices'],
+            'credit' => (string)$result['credit'],
+        ]);
+    }
+
     public function backbillDomains(array $data, string $actor = 'admin'): string
     {
         $userId = (int)($data['user_id'] ?? 0);
-        $user = $this->repo->user($userId);
+        $user = $this->repo->localUser($userId);
         if (!$user) {
             throw new InvalidArgumentException(t('billing.user_required'));
         }
@@ -292,23 +394,30 @@ final class BillingService
         return $path;
     }
 
-    private function queueDueDomainItems(DateTimeImmutable $lastRun, DateTimeImmutable $now): int
+    private function queueDueDomainItems(DateTimeImmutable $lastRun, DateTimeImmutable $now, ?int $onlyUserId = null): int
     {
         $count = 0;
         $users = $this->repo->usersFlatByServerExternalId();
+        $localUsers = $this->repo->localUsersById();
         $tldPrices = $this->repo->billingTldPricesByTld();
         $overrides = $this->repo->billingDomainOverridesByDomainId();
         $userSettings = $this->repo->billingUserSettingsByUserId();
         foreach ($this->repo->domains() as $domain) {
+            if (!empty($domain['is_deleted'])) {
+                continue;
+            }
             $userKey = (int)$domain['server_id'] . ':' . (string)($domain['owner_external_id'] ?? '');
-            if (!isset($users[$userKey])) {
+            $user = !empty($domain['local_user_id']) ? ($localUsers[(int)$domain['local_user_id']] ?? null) : ($users[$userKey] ?? null);
+            if (!$user) {
+                continue;
+            }
+            if ($onlyUserId !== null && (int)$user['id'] !== $onlyUserId) {
                 continue;
             }
             $tld = $this->tld((string)$domain['domain']);
             if ($tld === '' || empty($tldPrices[$tld]) || !(int)$tldPrices[$tld]['active']) {
                 continue;
             }
-            $user = $users[$userKey];
             $userDiscount = (float)($userSettings[(int)$user['id']]['discount_percent'] ?? 0);
             $override = $overrides[(int)$domain['id']] ?? [];
             $tax = $this->taxRate($override['tax_rate_id'] ?? $tldPrices[$tld]['tax_rate_id'] ?? null);
@@ -397,11 +506,14 @@ final class BillingService
         return (int)round($yearlyCents / $divisor, 0, PHP_ROUND_HALF_UP);
     }
 
-    private function queueDueUserItems(DateTimeImmutable $now): int
+    private function queueDueUserItems(DateTimeImmutable $now, ?int $onlyUserId = null): int
     {
         $count = 0;
         $settings = $this->repo->billingUserSettingsByUserId();
         foreach ($this->repo->billingUserItems(true) as $item) {
+            if ($onlyUserId !== null && (int)$item['user_id'] !== $onlyUserId) {
+                continue;
+            }
             $dueDates = $this->dueItemDates($item, $now);
             foreach ($dueDates as $dueDate) {
                 $userDiscount = (float)($settings[(int)$item['user_id']]['discount_percent'] ?? 0);
@@ -680,7 +792,7 @@ final class BillingService
             throw new RuntimeException(t('billing.invoice_not_found'));
         }
         if (($invoice['status'] ?? '') !== 'sent') {
-            $user = $this->repo->user((int)($invoice['user_id'] ?? 0));
+            $user = $this->repo->localUser((int)($invoice['user_id'] ?? 0));
             if ($user) {
                 $snapshot = $this->invoiceRecipientSnapshot($user);
                 $currentSnapshot = json_decode((string)($invoice['recipient_snapshot'] ?? ''), true) ?: [];
@@ -710,7 +822,8 @@ final class BillingService
 
     private function mailInvoice(array $invoice, string $pdfPath): bool
     {
-        $email = trim((string)($invoice['email'] ?? ''));
+        $snapshot = json_decode((string)($invoice['recipient_snapshot'] ?? ''), true) ?: [];
+        $email = trim((string)($snapshot['invoice_email'] ?? $invoice['invoice_email'] ?? $invoice['email'] ?? ''));
         if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || !is_file($pdfPath)) {
             return false;
         }
@@ -762,30 +875,23 @@ final class BillingService
 
     private function invoiceRecipientSnapshot(array $user): array
     {
-        $raw = [];
-        if (isset($user['raw_json']) && is_string($user['raw_json']) && trim($user['raw_json']) !== '') {
-            $raw = json_decode($user['raw_json'], true) ?: [];
-        }
-        $contact = $raw['contact_data'] ?? $user['contact_data'] ?? [];
-        if (!is_array($contact)) {
-            $contact = [];
-        }
         $settings = $this->repo->billingUserSetting((int)$user['id']);
         return [
             'id' => (int)$user['id'],
-            'server_id' => (int)$user['server_id'],
+            'server_id' => (int)($user['server_id'] ?? 0),
             'server_name' => $user['server_name'] ?? '',
             'username' => $user['username'] ?? '',
-            'email' => $contact['email'] ?? $user['email'] ?? '',
-            'company' => $contact['company'] ?? '',
-            'first_name' => $contact['first_name'] ?? '',
-            'last_name' => $contact['last_name'] ?? '',
-            'address' => $contact['address'] ?? '',
-            'postcode' => $contact['zip'] ?? $contact['postcode'] ?? '',
-            'city' => $contact['city'] ?? '',
-            'region' => $contact['state'] ?? $contact['region'] ?? '',
-            'country' => $contact['country'] ?? '',
-            'customer_number' => $contact['client_id'] ?? '',
+            'email' => $user['email'] ?? '',
+            'invoice_email' => $user['invoice_email'] ?? '',
+            'company' => $user['company'] ?? '',
+            'first_name' => $user['first_name'] ?? '',
+            'last_name' => $user['last_name'] ?? ($user['display_name'] ?? ''),
+            'address' => $user['address'] ?? '',
+            'postcode' => $user['postcode'] ?? '',
+            'city' => $user['city'] ?? '',
+            'region' => $user['region'] ?? '',
+            'country' => $user['country'] ?? '',
+            'customer_number' => $user['customer_number'] ?? '',
             'billing_discount_percent' => (float)($settings['discount_percent'] ?? 0),
         ];
     }

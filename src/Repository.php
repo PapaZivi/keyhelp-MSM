@@ -179,12 +179,14 @@ final class Repository
     public function domain(int $id): ?array
     {
         $stmt = $this->pdo->prepare('
-            SELECT d.*, s.name AS server_name, duplicates.server_count AS duplicate_server_count
+            SELECT d.*, s.name AS server_name, lu.display_name AS local_user_name, duplicates.server_count AS duplicate_server_count
             FROM domains d
             JOIN servers s ON s.id = d.server_id
-            JOIN (
+            LEFT JOIN local_users lu ON lu.id = d.local_user_id
+            LEFT JOIN (
                 SELECT domain, COUNT(DISTINCT server_id) AS server_count
                 FROM domains
+                WHERE is_deleted = 0
                 GROUP BY domain
             ) duplicates ON duplicates.domain = d.domain
             WHERE d.id = ?
@@ -197,15 +199,17 @@ final class Repository
     public function domains(): array
     {
         return $this->pdo->query('
-            SELECT d.*, s.name AS server_name, duplicates.server_count AS duplicate_server_count
+            SELECT d.*, s.name AS server_name, lu.display_name AS local_user_name, duplicates.server_count AS duplicate_server_count
             FROM domains d
             JOIN servers s ON s.id = d.server_id
-            JOIN (
+            LEFT JOIN local_users lu ON lu.id = d.local_user_id
+            LEFT JOIN (
                 SELECT domain, COUNT(DISTINCT server_id) AS server_count
                 FROM domains
+                WHERE is_deleted = 0
                 GROUP BY domain
             ) duplicates ON duplicates.domain = d.domain
-            ORDER BY d.domain, s.name
+            ORDER BY d.is_deleted, d.domain, s.name
         ')->fetchAll();
     }
 
@@ -220,9 +224,10 @@ final class Repository
             ];
         }
         $rows = $this->pdo->query('
-            SELECT u.*, s.name AS server_name
+            SELECT u.*, s.name AS server_name, lu.display_name AS local_user_name, lu.email AS local_user_email
             FROM keyhelp_users u
             JOIN servers s ON s.id = u.server_id
+            LEFT JOIN local_users lu ON lu.id = u.local_user_id
             WHERE s.active = 1
             ORDER BY s.name, u.username, u.email
         ')->fetchAll();
@@ -487,9 +492,10 @@ final class Repository
         }
         $ownerId = DomainOwner::id($domain);
         $ownerName = DomainOwner::name($domain, $usersById);
-        $stmt = $this->pdo->prepare('INSERT INTO domains(server_id, external_id, domain, owner_external_id, owner_name, registered_at, next_billing_at, registrar, domain_status, is_disabled, suspend_on, delete_on, synced_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE external_id = VALUES(external_id), owner_external_id = VALUES(owner_external_id), owner_name = VALUES(owner_name), domain_status = VALUES(domain_status), is_disabled = VALUES(is_disabled), suspend_on = VALUES(suspend_on), delete_on = VALUES(delete_on), synced_at = CURRENT_TIMESTAMP');
+        $stmt = $this->pdo->prepare('INSERT INTO domains(server_id, local_user_id, external_id, domain, owner_external_id, owner_name, registered_at, next_billing_at, registrar, domain_status, is_disabled, is_deleted, deleted_at, suspend_on, delete_on, synced_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE local_user_id = COALESCE(VALUES(local_user_id), local_user_id), external_id = VALUES(external_id), owner_external_id = VALUES(owner_external_id), owner_name = VALUES(owner_name), domain_status = VALUES(domain_status), is_disabled = VALUES(is_disabled), is_deleted = 0, deleted_at = NULL, suspend_on = VALUES(suspend_on), delete_on = VALUES(delete_on), synced_at = CURRENT_TIMESTAMP');
         $stmt->execute([
             $serverId,
+            $this->localUserIdForRemoteOwner($serverId, $ownerId),
             (string)($domain['id'] ?? ''),
             strtolower(trim((string)$name, " \t\n\r\0\x0B.")),
             $ownerId,
@@ -522,17 +528,36 @@ final class Repository
         $stmt->execute([$id]);
     }
 
+    public function markDomainDeleted(int $id): void
+    {
+        $stmt = $this->pdo->prepare('UPDATE domains SET is_deleted = 1, deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP) WHERE id = ?');
+        $stmt->execute([$id]);
+    }
+
+    private function domainExistsOnAnotherServer(string $domain, int $serverId): bool
+    {
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM domains WHERE domain = ? AND server_id <> ? AND is_deleted = 0');
+        $stmt->execute([$domain, $serverId]);
+        return (int)$stmt->fetchColumn() > 0;
+    }
+
     public function deleteDomainsExcept(int $serverId, array $domainNames): void
     {
         $domainNames = array_values(array_filter($domainNames));
-        if ($domainNames === []) {
-            $stmt = $this->pdo->prepare('DELETE FROM domains WHERE server_id = ?');
-            $stmt->execute([$serverId]);
-            return;
+        $sql = 'SELECT id, domain FROM domains WHERE server_id = ? AND is_deleted = 0';
+        $params = [$serverId];
+        if ($domainNames !== []) {
+            $placeholders = implode(',', array_fill(0, count($domainNames), '?'));
+            $sql .= ' AND domain NOT IN (' . $placeholders . ')';
+            $params = array_merge($params, $domainNames);
         }
-        $placeholders = implode(',', array_fill(0, count($domainNames), '?'));
-        $stmt = $this->pdo->prepare('DELETE FROM domains WHERE server_id = ? AND domain NOT IN (' . $placeholders . ')');
-        $stmt->execute(array_merge([$serverId], $domainNames));
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        foreach ($stmt->fetchAll() as $domain) {
+            if (!$this->domainExistsOnAnotherServer((string)$domain['domain'], $serverId)) {
+                $this->markDomainDeleted((int)$domain['id']);
+            }
+        }
     }
 
     public function saveUser(int $serverId, array $user): void
@@ -551,6 +576,212 @@ final class Repository
         ]);
     }
 
+    public function createLocalUser(array $data): int
+    {
+        $name = trim((string)($data['display_name'] ?? ''));
+        if ($name === '') {
+            $name = t('common.unknown');
+        }
+        $stmt = $this->pdo->prepare('
+            INSERT INTO local_users(
+                display_name, email, invoice_email, customer_number, company, first_name, last_name, phone,
+                address, postcode, city, region, country, notes
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ');
+        $stmt->execute([
+            $name,
+            trim((string)($data['email'] ?? '')) ?: null,
+            trim((string)($data['invoice_email'] ?? '')) ?: null,
+            trim((string)($data['customer_number'] ?? '')) ?: null,
+            trim((string)($data['company'] ?? '')) ?: null,
+            trim((string)($data['first_name'] ?? '')) ?: null,
+            trim((string)($data['last_name'] ?? '')) ?: null,
+            trim((string)($data['phone'] ?? '')) ?: null,
+            trim((string)($data['address'] ?? '')) ?: null,
+            trim((string)($data['postcode'] ?? '')) ?: null,
+            trim((string)($data['city'] ?? '')) ?: null,
+            trim((string)($data['region'] ?? '')) ?: null,
+            trim((string)($data['country'] ?? '')) ?: null,
+            trim((string)($data['notes'] ?? '')) ?: null,
+        ]);
+        return (int)$this->pdo->lastInsertId();
+    }
+
+    public function updateLocalUser(array $data): void
+    {
+        $id = (int)($data['id'] ?? 0);
+        $name = trim((string)($data['display_name'] ?? ''));
+        if ($id <= 0 || $name === '') {
+            throw new InvalidArgumentException(t('users.local_user_required'));
+        }
+        $stmt = $this->pdo->prepare('
+            UPDATE local_users
+            SET display_name = ?, email = ?, invoice_email = ?, customer_number = ?, company = ?, first_name = ?,
+                last_name = ?, phone = ?, address = ?, postcode = ?, city = ?, region = ?,
+                country = ?, notes = ?
+            WHERE id = ?
+        ');
+        $stmt->execute([
+            $name,
+            trim((string)($data['email'] ?? '')) ?: null,
+            trim((string)($data['invoice_email'] ?? '')) ?: null,
+            trim((string)($data['customer_number'] ?? '')) ?: null,
+            trim((string)($data['company'] ?? '')) ?: null,
+            trim((string)($data['first_name'] ?? '')) ?: null,
+            trim((string)($data['last_name'] ?? '')) ?: null,
+            trim((string)($data['phone'] ?? '')) ?: null,
+            trim((string)($data['address'] ?? '')) ?: null,
+            trim((string)($data['postcode'] ?? '')) ?: null,
+            trim((string)($data['city'] ?? '')) ?: null,
+            trim((string)($data['region'] ?? '')) ?: null,
+            trim((string)($data['country'] ?? '')) ?: null,
+            trim((string)($data['notes'] ?? '')) ?: null,
+            $id,
+        ]);
+    }
+
+    public function createLocalUserFromRemoteUser(int $remoteUserId): int
+    {
+        $remote = $this->user($remoteUserId);
+        if (!$remote) {
+            throw new RuntimeException(t('message.user_not_found'));
+        }
+        $raw = json_decode((string)($remote['raw_json'] ?? '{}'), true) ?: [];
+        $contact = isset($raw['contact_data']) && is_array($raw['contact_data']) ? $raw['contact_data'] : [];
+        $localUserId = $this->createLocalUser([
+            'display_name' => (string)($remote['username'] ?? t('common.unknown')),
+            'email' => (string)($contact['email'] ?? $remote['email'] ?? ''),
+            'invoice_email' => (string)($contact['email'] ?? $remote['email'] ?? ''),
+            'customer_number' => (string)($contact['client_id'] ?? ''),
+            'company' => (string)($contact['company'] ?? ''),
+            'first_name' => (string)($contact['first_name'] ?? ''),
+            'last_name' => (string)($contact['last_name'] ?? ''),
+            'phone' => (string)($contact['telephone'] ?? ''),
+            'address' => (string)($contact['address'] ?? ''),
+            'postcode' => (string)($contact['zip'] ?? ''),
+            'city' => (string)($contact['city'] ?? ''),
+            'region' => (string)($contact['state'] ?? ''),
+            'country' => (string)($contact['country'] ?? ''),
+            'notes' => (string)($raw['notes'] ?? ''),
+        ]);
+        $this->assignRemoteUserToLocalUser($remoteUserId, $localUserId);
+        return $localUserId;
+    }
+
+    public function deleteLocalUser(int $id): void
+    {
+        if ($id <= 0) {
+            throw new InvalidArgumentException(t('users.local_user_required'));
+        }
+        $blockers = $this->localUserDeleteBlockers($id);
+        if (in_array('remote_users', $blockers, true)) {
+            throw new RuntimeException(t('users.local_user_delete_has_remote_users'));
+        }
+        if (in_array('domains', $blockers, true)) {
+            throw new RuntimeException(t('users.local_user_delete_has_domains'));
+        }
+        if (in_array('pending_billing', $blockers, true)) {
+            throw new RuntimeException(t('users.local_user_delete_has_open_billing'));
+        }
+        if (in_array('open_invoices', $blockers, true)) {
+            throw new RuntimeException(t('users.local_user_delete_has_open_invoices'));
+        }
+        if (in_array('invoices', $blockers, true)) {
+            throw new RuntimeException(t('users.local_user_delete_has_invoices'));
+        }
+        if (in_array('customer_account', $blockers, true)) {
+            throw new RuntimeException(t('users.local_user_delete_has_customer_account'));
+        }
+        $stmt = $this->pdo->prepare('DELETE FROM local_users WHERE id = ?');
+        $stmt->execute([$id]);
+    }
+
+    public function localUserDeleteBlockersById(): array
+    {
+        $blockers = [];
+        foreach ($this->usersFlat() as $user) {
+            $blockers[(int)$user['id']] = $this->localUserDeleteBlockers((int)$user['id']);
+        }
+        return $blockers;
+    }
+
+    private function localUserDeleteBlockers(int $id): array
+    {
+        $blockers = [];
+        if ($this->countByColumn('keyhelp_users', 'local_user_id', $id) > 0) {
+            $blockers[] = 'remote_users';
+        }
+        if ($this->countByColumn('domains', 'local_user_id', $id) > 0) {
+            $blockers[] = 'domains';
+        }
+        if ($this->countByColumn('billing_pending_items', 'user_id', $id) > 0) {
+            $blockers[] = 'pending_billing';
+        }
+        if ($this->openInvoiceCountForUser($id) > 0) {
+            $blockers[] = 'open_invoices';
+        }
+        if ($this->countByColumn('invoices', 'user_id', $id) > 0) {
+            $blockers[] = 'invoices';
+        }
+        if ($this->countByColumn('billing_payments', 'user_id', $id) > 0) {
+            $blockers[] = 'customer_account';
+        }
+        return $blockers;
+    }
+
+    private function countByColumn(string $table, string $column, int $value): int
+    {
+        $allowed = [
+            'keyhelp_users' => ['local_user_id'],
+            'domains' => ['local_user_id'],
+            'billing_pending_items' => ['user_id'],
+            'invoices' => ['user_id'],
+            'billing_payments' => ['user_id'],
+        ];
+        if (!isset($allowed[$table]) || !in_array($column, $allowed[$table], true)) {
+            throw new InvalidArgumentException('Invalid count target.');
+        }
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM `' . $table . '` WHERE `' . $column . '` = ?');
+        $stmt->execute([$value]);
+        return (int)$stmt->fetchColumn();
+    }
+
+    private function openInvoiceCountForUser(int $userId): int
+    {
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM invoices WHERE user_id = ? AND status NOT IN ('sent', 'cancelled')");
+        $stmt->execute([$userId]);
+        return (int)$stmt->fetchColumn();
+    }
+
+    public function assignRemoteUserToLocalUser(int $remoteUserId, int $localUserId): void
+    {
+        $remote = $this->user($remoteUserId);
+        $stmt = $this->pdo->prepare('UPDATE keyhelp_users SET local_user_id = ? WHERE id = ?');
+        $stmt->execute([$localUserId, $remoteUserId]);
+        if ($remote) {
+            $domainStmt = $this->pdo->prepare('UPDATE domains SET local_user_id = ? WHERE server_id = ? AND owner_external_id = ?');
+            $domainStmt->execute([$localUserId, (int)$remote['server_id'], (string)$remote['external_id']]);
+        }
+    }
+
+    public function billingUserIdForRemoteUser(int $remoteUserId): int
+    {
+        $stmt = $this->pdo->prepare('SELECT local_user_id FROM keyhelp_users WHERE id = ?');
+        $stmt->execute([$remoteUserId]);
+        return (int)($stmt->fetchColumn() ?: 0);
+    }
+
+    private function localUserIdForRemoteOwner(int $serverId, string $ownerExternalId): ?int
+    {
+        if ($ownerExternalId === '') {
+            return null;
+        }
+        $stmt = $this->pdo->prepare('SELECT local_user_id FROM keyhelp_users WHERE server_id = ? AND external_id = ?');
+        $stmt->execute([$serverId, $ownerExternalId]);
+        $id = $stmt->fetchColumn();
+        return $id === false || $id === null ? null : (int)$id;
+    }
+
     public function user(int $id): ?array
     {
         $stmt = $this->pdo->prepare('
@@ -562,6 +793,64 @@ final class Repository
         $stmt->execute([$id]);
         $user = $stmt->fetch();
         return $user ?: null;
+    }
+
+    public function localUser(int $id): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT *, display_name AS username, "" AS server_name FROM local_users WHERE id = ?');
+        $stmt->execute([$id]);
+        $user = $stmt->fetch();
+        return $user ?: null;
+    }
+
+    public function localUsersById(): array
+    {
+        $users = [];
+        foreach ($this->pdo->query('SELECT *, display_name AS username, "" AS server_name FROM local_users ORDER BY display_name')->fetchAll() as $user) {
+            $users[(int)$user['id']] = $user;
+        }
+        return $users;
+    }
+
+    public function unassignedRemoteUsers(): array
+    {
+        return $this->pdo->query('
+            SELECT u.*, s.name AS server_name
+            FROM keyhelp_users u
+            JOIN servers s ON s.id = u.server_id
+            WHERE u.local_user_id IS NULL
+            ORDER BY s.name, u.username
+        ')->fetchAll();
+    }
+
+    public function remoteUsersByLocalUserId(): array
+    {
+        $users = [];
+        foreach ($this->pdo->query('
+            SELECT u.*, s.name AS server_name
+            FROM keyhelp_users u
+            JOIN servers s ON s.id = u.server_id
+            WHERE u.local_user_id IS NOT NULL
+            ORDER BY s.name, u.username
+        ')->fetchAll() as $user) {
+            $users[(int)$user['local_user_id']][] = $user;
+        }
+        return $users;
+    }
+
+    public function domainsByLocalUserId(): array
+    {
+        $domains = [];
+        foreach ($this->pdo->query('
+            SELECT d.*, s.name AS server_name
+            FROM domains d
+            JOIN servers s ON s.id = d.server_id
+            WHERE d.local_user_id IS NOT NULL
+            ORDER BY d.domain, s.name
+        ')->fetchAll() as $domain) {
+            $domains[(int)$domain['local_user_id']][] = $domain;
+        }
+        return $domains;
     }
 
     public function userByExternalId(int $serverId, string|int $externalId): ?array
@@ -659,8 +948,10 @@ final class Repository
         if (!in_array($frequency, self::billingFrequencyOptions(), true)) {
             $frequency = 'yearly';
         }
-        $stmt = $this->pdo->prepare('UPDATE domains SET registered_at = ?, next_billing_at = ?, billing_frequency = ?, last_change_at = ?, registrar = ?, domain_owner_contact = ?, domain_admin_c = ?, domain_tech_c = ?, domain_zone_c = ? WHERE id = ?');
+        $localUserId = (int)($data['local_user_id'] ?? 0);
+        $stmt = $this->pdo->prepare('UPDATE domains SET local_user_id = ?, registered_at = ?, next_billing_at = ?, billing_frequency = ?, last_change_at = ?, registrar = ?, domain_owner_contact = ?, domain_admin_c = ?, domain_tech_c = ?, domain_zone_c = ? WHERE id = ?');
         $stmt->execute([
+            $localUserId > 0 ? $localUserId : null,
             ($data['registered_at'] ?? '') ?: null,
             ($data['next_billing_at'] ?? '') ?: null,
             $frequency,
@@ -780,6 +1071,7 @@ final class Repository
             'taxRates' => $this->billingTaxRates(),
             'tldPrices' => $this->billingTldPrices(),
             'domainOverrides' => $this->billingDomainOverrides(),
+            'users' => $this->usersFlat(),
             'userSettings' => $this->billingUserSettingsByUserId(),
             'userItems' => $this->billingUserItems(false),
             'userItemsByUserId' => $this->billingUserItemsByUserId(false),
@@ -958,13 +1250,38 @@ final class Repository
 
     public function usersFlat(): array
     {
-        return $this->pdo->query('SELECT u.*, s.name AS server_name FROM keyhelp_users u JOIN servers s ON s.id = u.server_id ORDER BY s.name, u.username')->fetchAll();
+        return $this->pdo->query('
+            SELECT
+                id,
+                display_name AS username,
+                display_name,
+                email,
+                invoice_email,
+                customer_number,
+                company,
+                first_name,
+                last_name,
+                phone,
+                address,
+                postcode,
+                city,
+                region,
+                country,
+                notes
+            FROM local_users
+            ORDER BY display_name
+        ')->fetchAll();
     }
 
     public function usersFlatByServerExternalId(): array
     {
         $users = [];
-        foreach ($this->usersFlat() as $user) {
+        foreach ($this->pdo->query('
+            SELECT u.server_id, u.external_id, lu.id, lu.display_name AS username, lu.email, s.name AS server_name
+            FROM keyhelp_users u
+            JOIN local_users lu ON lu.id = u.local_user_id
+            JOIN servers s ON s.id = u.server_id
+        ')->fetchAll() as $user) {
             $users[(int)$user['server_id'] . ':' . (string)$user['external_id']] = $user;
         }
         return $users;
@@ -972,11 +1289,11 @@ final class Repository
 
     public function billingUserItems(bool $activeOnly): array
     {
-        $sql = 'SELECT i.*, u.username, u.email, s.name AS server_name, t.name AS tax_name, t.rate_percent FROM billing_user_items i JOIN keyhelp_users u ON u.id = i.user_id JOIN servers s ON s.id = u.server_id LEFT JOIN billing_tax_rates t ON t.id = i.tax_rate_id';
+        $sql = 'SELECT i.*, u.display_name AS username, u.email, "" AS server_name, t.name AS tax_name, t.rate_percent FROM billing_user_items i JOIN local_users u ON u.id = i.user_id LEFT JOIN billing_tax_rates t ON t.id = i.tax_rate_id';
         if ($activeOnly) {
             $sql .= ' WHERE i.active = 1';
         }
-        $sql .= ' ORDER BY s.name, u.username, i.description';
+        $sql .= ' ORDER BY u.display_name, i.description';
         return $this->pdo->query($sql)->fetchAll();
     }
 
@@ -1109,12 +1426,12 @@ final class Repository
 
     public function pendingBillingItems(): array
     {
-        return $this->pdo->query('SELECT p.*, u.username, s.name AS server_name FROM billing_pending_items p JOIN keyhelp_users u ON u.id = p.user_id JOIN servers s ON s.id = u.server_id ORDER BY p.created_at DESC')->fetchAll();
+        return $this->pdo->query('SELECT p.*, u.display_name AS username, "" AS server_name FROM billing_pending_items p JOIN local_users u ON u.id = p.user_id ORDER BY p.created_at DESC')->fetchAll();
     }
 
     public function billingUsersWithPendingItems(): array
     {
-        return $this->pdo->query('SELECT DISTINCT u.*, s.name AS server_name FROM billing_pending_items p JOIN keyhelp_users u ON u.id = p.user_id JOIN servers s ON s.id = u.server_id ORDER BY s.name, u.username')->fetchAll();
+        return $this->pdo->query('SELECT DISTINCT u.*, u.display_name AS username, "" AS server_name FROM billing_pending_items p JOIN local_users u ON u.id = p.user_id ORDER BY u.display_name')->fetchAll();
     }
 
     public function pendingBillingItemsForUser(int $userId): array
@@ -1217,17 +1534,51 @@ final class Repository
 
     public function invoices(): array
     {
-        return $this->pdo->query('SELECT i.*, u.username, u.email, s.name AS server_name FROM invoices i JOIN keyhelp_users u ON u.id = i.user_id JOIN servers s ON s.id = u.server_id ORDER BY i.created_at DESC, i.id DESC')->fetchAll();
+        return $this->pdo->query('
+            SELECT
+                i.*,
+                u.display_name AS username,
+                u.email,
+                u.invoice_email,
+                "" AS server_name,
+                COALESCE(payments.paid_total, 0) AS paid_total,
+                GREATEST(i.total - COALESCE(payments.paid_total, 0), 0) AS open_total
+            FROM invoices i
+            JOIN local_users u ON u.id = i.user_id
+            LEFT JOIN (
+                SELECT invoice_id, SUM(amount) AS paid_total
+                FROM billing_payment_allocations
+                GROUP BY invoice_id
+            ) payments ON payments.invoice_id = i.id
+            ORDER BY i.created_at DESC, i.id DESC
+        ')->fetchAll();
     }
 
     public function queuedInvoices(): array
     {
-        return $this->pdo->query("SELECT i.*, u.username, u.email FROM invoices i JOIN keyhelp_users u ON u.id = i.user_id WHERE i.status = 'queued' ORDER BY i.created_at, i.id")->fetchAll();
+        return $this->pdo->query("SELECT i.*, u.display_name AS username, u.email, u.invoice_email FROM invoices i JOIN local_users u ON u.id = i.user_id WHERE i.status = 'queued' ORDER BY i.created_at, i.id")->fetchAll();
     }
 
     public function invoice(int $id): ?array
     {
-        $stmt = $this->pdo->prepare('SELECT i.*, u.username, u.email, s.name AS server_name FROM invoices i JOIN keyhelp_users u ON u.id = i.user_id JOIN servers s ON s.id = u.server_id WHERE i.id = ?');
+        $stmt = $this->pdo->prepare('
+            SELECT
+                i.*,
+                u.display_name AS username,
+                u.email,
+                u.invoice_email,
+                "" AS server_name,
+                COALESCE(payments.paid_total, 0) AS paid_total,
+                GREATEST(i.total - COALESCE(payments.paid_total, 0), 0) AS open_total
+            FROM invoices i
+            JOIN local_users u ON u.id = i.user_id
+            LEFT JOIN (
+                SELECT invoice_id, SUM(amount) AS paid_total
+                FROM billing_payment_allocations
+                GROUP BY invoice_id
+            ) payments ON payments.invoice_id = i.id
+            WHERE i.id = ?
+        ');
         $stmt->execute([$id]);
         $invoice = $stmt->fetch();
         return $invoice ?: null;
@@ -1262,6 +1613,190 @@ final class Repository
     {
         $stmt = $this->pdo->prepare("UPDATE invoices SET status = 'failed', send_error = ? WHERE id = ? AND immutable_at IS NULL");
         $stmt->execute([$error, $invoiceId]);
+    }
+
+    public function markInvoicePaid(int $invoiceId, string $paidAt, string $reference, string $note): void
+    {
+        $stmt = $this->pdo->prepare('UPDATE invoices SET paid_at = ?, payment_reference = ?, payment_note = ? WHERE id = ?');
+        $stmt->execute([
+            $paidAt,
+            $reference !== '' ? $reference : null,
+            $note !== '' ? $note : null,
+            $invoiceId,
+        ]);
+    }
+
+    public function recordCustomerPayment(int $userId, string $paidAt, mixed $amount, string $reference, string $note): array
+    {
+        $amountCents = $this->decimalToCents($amount);
+        if ($userId <= 0 || $amountCents === 0) {
+            throw new InvalidArgumentException(t('billing.payment_amount_required'));
+        }
+        return $this->transaction(function () use ($userId, $paidAt, $amountCents, $reference, $note): array {
+            $stmt = $this->pdo->prepare('INSERT INTO billing_payments(user_id, paid_at, amount, reference, note) VALUES(?, ?, ?, ?, ?)');
+            $stmt->execute([
+                $userId,
+                $paidAt,
+                $this->centsToDecimal($amountCents),
+                $reference !== '' ? $reference : null,
+                $note !== '' ? $note : null,
+            ]);
+            $paymentId = (int)$this->pdo->lastInsertId();
+            if ($amountCents < 0) {
+                return [
+                    'payment_id' => $paymentId,
+                    'allocated' => '0.00',
+                    'credit' => $this->centsToDecimal($amountCents),
+                    'paid_invoices' => 0,
+                    'partial_invoices' => 0,
+                ];
+            }
+            $remaining = $amountCents;
+            $allocated = 0;
+            $paidInvoices = 0;
+            $partialInvoices = 0;
+            $invoiceStmt = $this->pdo->prepare("
+                SELECT
+                    i.id,
+                    i.invoice_number,
+                    i.total,
+                    COALESCE(SUM(a.amount), 0) AS paid_total
+                FROM invoices i
+                LEFT JOIN billing_payment_allocations a ON a.invoice_id = i.id
+                WHERE i.user_id = ? AND i.status IN ('approved', 'queued', 'sent')
+                GROUP BY i.id
+                HAVING i.total > paid_total
+                ORDER BY COALESCE(i.period_end, i.created_at), i.created_at, i.id
+            ");
+            $invoiceStmt->execute([$userId]);
+            $allocationStmt = $this->pdo->prepare('INSERT INTO billing_payment_allocations(payment_id, invoice_id, amount) VALUES(?, ?, ?)');
+            foreach ($invoiceStmt->fetchAll() as $invoice) {
+                if ($remaining <= 0) {
+                    break;
+                }
+                $open = max(0, $this->decimalToCents($invoice['total']) - $this->decimalToCents($invoice['paid_total']));
+                if ($open <= 0) {
+                    continue;
+                }
+                $share = min($remaining, $open);
+                $allocationStmt->execute([$paymentId, (int)$invoice['id'], $this->centsToDecimal($share)]);
+                $remaining -= $share;
+                $allocated += $share;
+                if ($share >= $open) {
+                    $paidInvoices++;
+                    $this->markInvoicePaid((int)$invoice['id'], $paidAt, $reference, $note);
+                } else {
+                    $partialInvoices++;
+                }
+            }
+            return [
+                'payment_id' => $paymentId,
+                'allocated' => $this->centsToDecimal($allocated),
+                'credit' => $this->centsToDecimal($remaining),
+                'paid_invoices' => $paidInvoices,
+                'partial_invoices' => $partialInvoices,
+            ];
+        });
+    }
+
+    public function customerAccountBalancesByUserId(): array
+    {
+        $balances = [];
+        foreach ($this->pdo->query('
+            SELECT
+                users.user_id,
+                COALESCE(payments.total_paid, 0) - COALESCE(invoices.total_invoiced, 0) AS balance
+            FROM (
+                SELECT user_id FROM billing_payments
+                UNION
+                SELECT user_id FROM invoices WHERE status IN ("approved", "queued", "sent")
+            ) users
+            LEFT JOIN (
+                SELECT user_id, SUM(amount) AS total_paid
+                FROM billing_payments
+                GROUP BY user_id
+            ) payments ON payments.user_id = users.user_id
+            LEFT JOIN (
+                SELECT user_id, SUM(total) AS total_invoiced
+                FROM invoices
+                WHERE status IN ("approved", "queued", "sent")
+                GROUP BY user_id
+            ) invoices ON invoices.user_id = users.user_id
+        ')->fetchAll() as $row) {
+            $balances[(int)$row['user_id']] = $row['balance'];
+        }
+        return $balances;
+    }
+
+    public function customerAccountPendingTotalsByUserId(): array
+    {
+        $totals = [];
+        foreach ($this->pdo->query('
+            SELECT
+                i.user_id,
+                SUM(ABS(i.total)) AS pending_total
+            FROM invoices i
+            WHERE i.status IN ("draft", "pending_approval", "failed")
+            GROUP BY i.user_id
+        ')->fetchAll() as $row) {
+            $totals[(int)$row['user_id']] = $row['pending_total'];
+        }
+        return $totals;
+    }
+
+    public function customerAccountEntriesByUserId(): array
+    {
+        $entries = [];
+        foreach ($this->pdo->query('
+            SELECT
+                p.user_id,
+                p.paid_at AS entry_date,
+                p.created_at AS sort_date,
+                CONCAT("payment:", p.id) AS entry_key,
+                "payment" AS entry_type,
+                p.reference,
+                p.note,
+                NULL AS invoice_number,
+                NULL AS invoice_id,
+                NULL AS status,
+                p.amount AS amount,
+                NULL AS open_total
+            FROM billing_payments p
+            UNION ALL
+            SELECT
+                i.user_id,
+                DATE(COALESCE(i.period_end, i.created_at)) AS entry_date,
+                i.created_at AS sort_date,
+                CONCAT("invoice:", i.id) AS entry_key,
+                "invoice" AS entry_type,
+                NULL AS reference,
+                NULL AS note,
+                i.invoice_number,
+                i.id AS invoice_id,
+                i.status,
+                -i.total AS amount,
+                GREATEST(i.total - COALESCE(payments.paid_total, 0), 0) AS open_total
+            FROM invoices i
+            LEFT JOIN (
+                SELECT invoice_id, SUM(amount) AS paid_total
+                FROM billing_payment_allocations
+                GROUP BY invoice_id
+            ) payments ON payments.invoice_id = i.id
+            WHERE i.status <> "cancelled"
+            ORDER BY entry_date DESC, sort_date DESC, entry_key DESC
+        ')->fetchAll() as $entry) {
+            $entries[(int)$entry['user_id']][] = $entry;
+        }
+        return $entries;
+    }
+
+    public function customerAccountForUser(int $userId): array
+    {
+        return [
+            'balance' => $this->customerAccountBalancesByUserId()[$userId] ?? '0.00',
+            'pending_total' => $this->customerAccountPendingTotalsByUserId()[$userId] ?? '0.00',
+            'entries' => $this->customerAccountEntriesByUserId()[$userId] ?? [],
+        ];
     }
 
     private function decimalToCents(mixed $value): int

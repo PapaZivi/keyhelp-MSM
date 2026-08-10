@@ -53,6 +53,7 @@ if (empty($_SESSION['authenticated'])) {
     exit;
 }
 require dirname(__DIR__) . '/src/Database.php';
+require dirname(__DIR__) . '/src/Migration.php';
 require dirname(__DIR__) . '/src/DomainOwner.php';
 require dirname(__DIR__) . '/src/KeyHelpClient.php';
 require dirname(__DIR__) . '/src/InvoicePdfRenderer.php';
@@ -60,7 +61,7 @@ require dirname(__DIR__) . '/src/Repository.php';
 require dirname(__DIR__) . '/src/SyncService.php';
 require dirname(__DIR__) . '/src/BillingService.php';
 
-$repo = new Repository(Database::connect($config));
+$repo = new Repository(Migration::connect($config));
 $configuredLocale = $repo->locale((string)($config['app']['locale'] ?? 'de'));
 if (!isset($_GET['lang']) && !isset($_SESSION['locale'])) {
     i18n_set_locale($configuredLocale, false);
@@ -143,6 +144,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
             render_partial('users_content', [
                 'userGroups' => $repo->usersByServer(),
                 'returnPath' => '/?page=users',
+                'localUsers' => $repo->usersFlat(),
+                'remoteUsersByLocalUserId' => $repo->remoteUsersByLocalUserId(),
+                'domainsByLocalUserId' => $repo->domainsByLocalUserId(),
+                'unassignedRemoteUsers' => $repo->unassignedRemoteUsers(),
+                'localUserDeleteBlockers' => $repo->localUserDeleteBlockersById(),
+                'customerAccountBalances' => $repo->customerAccountBalancesByUserId(),
+                'customerAccountPendingTotals' => $repo->customerAccountPendingTotalsByUserId(),
+                'customerAccountEntries' => $repo->customerAccountEntriesByUserId(),
                 'billingUserSettings' => $repo->billingUserSettingsByUserId(),
                 'billingUserItems' => $repo->billingUserItemsByUserId(),
             ]);
@@ -155,6 +164,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
             render_partial('users_content', [
                 'userGroups' => $repo->usersByServer(),
                 'returnPath' => '/?page=users',
+                'localUsers' => $repo->usersFlat(),
+                'remoteUsersByLocalUserId' => $repo->remoteUsersByLocalUserId(),
+                'domainsByLocalUserId' => $repo->domainsByLocalUserId(),
+                'unassignedRemoteUsers' => $repo->unassignedRemoteUsers(),
+                'localUserDeleteBlockers' => $repo->localUserDeleteBlockersById(),
+                'customerAccountBalances' => $repo->customerAccountBalancesByUserId(),
+                'customerAccountPendingTotals' => $repo->customerAccountPendingTotalsByUserId(),
+                'customerAccountEntries' => $repo->customerAccountEntriesByUserId(),
                 'billingUserSettings' => $repo->billingUserSettingsByUserId(),
                 'billingUserItems' => $repo->billingUserItemsByUserId(),
             ]);
@@ -172,6 +189,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
             render_partial('users_content', [
                 'userGroups' => $repo->usersByServer(),
                 'returnPath' => '/?page=users',
+                'localUsers' => $repo->usersFlat(),
+                'remoteUsersByLocalUserId' => $repo->remoteUsersByLocalUserId(),
+                'domainsByLocalUserId' => $repo->domainsByLocalUserId(),
+                'unassignedRemoteUsers' => $repo->unassignedRemoteUsers(),
+                'localUserDeleteBlockers' => $repo->localUserDeleteBlockersById(),
+                'customerAccountBalances' => $repo->customerAccountBalancesByUserId(),
+                'customerAccountPendingTotals' => $repo->customerAccountPendingTotalsByUserId(),
+                'customerAccountEntries' => $repo->customerAccountEntriesByUserId(),
                 'billingUserSettings' => $repo->billingUserSettingsByUserId(),
                 'billingUserItems' => $repo->billingUserItemsByUserId(),
             ]);
@@ -182,9 +207,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
             ], JSON_UNESCAPED_UNICODE);
             exit;
         }
-        if ($action === 'update_user') {
-            $localUserId = (int)($_POST['user_id'] ?? 0);
-            $message = $sync->updateUser($localUserId, $_POST);
+        if ($action === 'create_local_user') {
+            $id = $repo->createLocalUser($_POST);
+            ob_start();
+            render_partial('users_content', [
+                'userGroups' => $repo->usersByServer(),
+                'returnPath' => '/?page=users',
+                'localUsers' => $repo->usersFlat(),
+                'remoteUsersByLocalUserId' => $repo->remoteUsersByLocalUserId(),
+                'domainsByLocalUserId' => $repo->domainsByLocalUserId(),
+                'unassignedRemoteUsers' => $repo->unassignedRemoteUsers(),
+                'localUserDeleteBlockers' => $repo->localUserDeleteBlockersById(),
+                'customerAccountBalances' => $repo->customerAccountBalancesByUserId(),
+                'customerAccountPendingTotals' => $repo->customerAccountPendingTotalsByUserId(),
+                'customerAccountEntries' => $repo->customerAccountEntriesByUserId(),
+                'billingUserSettings' => $repo->billingUserSettingsByUserId(),
+                'billingUserItems' => $repo->billingUserItemsByUserId(),
+            ]);
+            echo json_encode([
+                'ok' => true,
+                'message' => t('message.local_user_created', ['name' => ($_POST['display_name'] ?? ('#' . $id))]),
+                'html' => ob_get_clean(),
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        if ($action === 'update_local_user') {
+            $repo->updateLocalUser($_POST);
+            $localUserId = (int)($_POST['id'] ?? 0);
             if ($localUserId > 0) {
                 $repo->saveBillingUserSettings([
                     'user_id' => $localUserId,
@@ -204,10 +253,229 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
                     ]);
                 }
             }
+            if ($localUserId > 0 && !empty($_POST['sync_remote_contacts'])) {
+                $sync->syncLocalContactToRemoteUsers($localUserId);
+            }
             ob_start();
             render_partial('users_content', [
                 'userGroups' => $repo->usersByServer(),
                 'returnPath' => '/?page=users',
+                'localUsers' => $repo->usersFlat(),
+                'remoteUsersByLocalUserId' => $repo->remoteUsersByLocalUserId(),
+                'domainsByLocalUserId' => $repo->domainsByLocalUserId(),
+                'unassignedRemoteUsers' => $repo->unassignedRemoteUsers(),
+                'localUserDeleteBlockers' => $repo->localUserDeleteBlockersById(),
+                'customerAccountBalances' => $repo->customerAccountBalancesByUserId(),
+                'customerAccountPendingTotals' => $repo->customerAccountPendingTotalsByUserId(),
+                'customerAccountEntries' => $repo->customerAccountEntriesByUserId(),
+                'billingUserSettings' => $repo->billingUserSettingsByUserId(),
+                'billingUserItems' => $repo->billingUserItemsByUserId(),
+            ]);
+            echo json_encode([
+                'ok' => true,
+                'message' => t('message.local_user_updated', ['name' => ($_POST['display_name'] ?? t('common.unknown'))]),
+                'html' => ob_get_clean(),
+                'items' => $localUserId > 0 ? ($repo->billingUserItemsByUserId()[$localUserId] ?? []) : [],
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        if ($action === 'assign_remote_user' || $action === 'create_local_user_from_remote') {
+            $remoteUserId = (int)($_POST['remote_user_id'] ?? 0);
+            if ($remoteUserId <= 0) {
+                throw new InvalidArgumentException(t('users.local_user_required'));
+            }
+            if ($action === 'create_local_user_from_remote') {
+                $repo->createLocalUserFromRemoteUser($remoteUserId);
+                $message = t('message.local_user_created', ['name' => ($_POST['remote_user_name'] ?? t('common.unknown'))]);
+            } else {
+                $localUserId = (int)($_POST['local_user_id'] ?? 0);
+                if ($localUserId <= 0) {
+                    throw new InvalidArgumentException(t('users.local_user_required'));
+                }
+                $repo->assignRemoteUserToLocalUser($remoteUserId, $localUserId);
+                $message = t('message.remote_user_assigned');
+            }
+            ob_start();
+            render_partial('users_content', [
+                'userGroups' => $repo->usersByServer(),
+                'returnPath' => '/?page=users',
+                'localUsers' => $repo->usersFlat(),
+                'remoteUsersByLocalUserId' => $repo->remoteUsersByLocalUserId(),
+                'domainsByLocalUserId' => $repo->domainsByLocalUserId(),
+                'unassignedRemoteUsers' => $repo->unassignedRemoteUsers(),
+                'localUserDeleteBlockers' => $repo->localUserDeleteBlockersById(),
+                'customerAccountBalances' => $repo->customerAccountBalancesByUserId(),
+                'customerAccountPendingTotals' => $repo->customerAccountPendingTotalsByUserId(),
+                'customerAccountEntries' => $repo->customerAccountEntriesByUserId(),
+                'billingUserSettings' => $repo->billingUserSettingsByUserId(),
+                'billingUserItems' => $repo->billingUserItemsByUserId(),
+            ]);
+            echo json_encode(['ok' => true, 'message' => $message, 'html' => ob_get_clean()], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        if ($action === 'delete_local_user') {
+            $localUserId = (int)($_POST['id'] ?? 0);
+            $repo->deleteLocalUser($localUserId);
+            ob_start();
+            render_partial('users_content', [
+                'userGroups' => $repo->usersByServer(),
+                'returnPath' => '/?page=users',
+                'localUsers' => $repo->usersFlat(),
+                'remoteUsersByLocalUserId' => $repo->remoteUsersByLocalUserId(),
+                'domainsByLocalUserId' => $repo->domainsByLocalUserId(),
+                'unassignedRemoteUsers' => $repo->unassignedRemoteUsers(),
+                'localUserDeleteBlockers' => $repo->localUserDeleteBlockersById(),
+                'customerAccountBalances' => $repo->customerAccountBalancesByUserId(),
+                'customerAccountPendingTotals' => $repo->customerAccountPendingTotalsByUserId(),
+                'customerAccountEntries' => $repo->customerAccountEntriesByUserId(),
+                'billingUserSettings' => $repo->billingUserSettingsByUserId(),
+                'billingUserItems' => $repo->billingUserItemsByUserId(),
+            ]);
+            echo json_encode([
+                'ok' => true,
+                'message' => t('message.local_user_deleted'),
+                'html' => ob_get_clean(),
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        if ($action === 'billing_customer_payment') {
+            $localUserId = (int)($_POST['user_id'] ?? 0);
+            $message = $billingService->recordCustomerPayment(
+                $localUserId,
+                $_POST,
+                (string)($config['app']['admin_user'] ?? 'admin')
+            );
+            $account = $repo->customerAccountForUser($localUserId);
+            ob_start();
+            render_partial('users_content', [
+                'userGroups' => $repo->usersByServer(),
+                'returnPath' => '/?page=users',
+                'localUsers' => $repo->usersFlat(),
+                'remoteUsersByLocalUserId' => $repo->remoteUsersByLocalUserId(),
+                'domainsByLocalUserId' => $repo->domainsByLocalUserId(),
+                'unassignedRemoteUsers' => $repo->unassignedRemoteUsers(),
+                'localUserDeleteBlockers' => $repo->localUserDeleteBlockersById(),
+                'customerAccountBalances' => $repo->customerAccountBalancesByUserId(),
+                'customerAccountPendingTotals' => $repo->customerAccountPendingTotalsByUserId(),
+                'customerAccountEntries' => $repo->customerAccountEntriesByUserId(),
+                'billingUserSettings' => $repo->billingUserSettingsByUserId(),
+                'billingUserItems' => $repo->billingUserItemsByUserId(),
+            ]);
+            echo json_encode([
+                'ok' => true,
+                'message' => $message,
+                'account' => $account,
+                'html' => ob_get_clean(),
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        if ($action === 'billing_run_local_user') {
+            $localUserId = (int)($_POST['user_id'] ?? 0);
+            $message = $billingService->runForUser(
+                $localUserId,
+                (string)($config['app']['admin_user'] ?? 'admin')
+            );
+            $account = $repo->customerAccountForUser($localUserId);
+            ob_start();
+            render_partial('users_content', [
+                'userGroups' => $repo->usersByServer(),
+                'returnPath' => '/?page=users',
+                'localUsers' => $repo->usersFlat(),
+                'remoteUsersByLocalUserId' => $repo->remoteUsersByLocalUserId(),
+                'domainsByLocalUserId' => $repo->domainsByLocalUserId(),
+                'unassignedRemoteUsers' => $repo->unassignedRemoteUsers(),
+                'localUserDeleteBlockers' => $repo->localUserDeleteBlockersById(),
+                'customerAccountBalances' => $repo->customerAccountBalancesByUserId(),
+                'customerAccountPendingTotals' => $repo->customerAccountPendingTotalsByUserId(),
+                'customerAccountEntries' => $repo->customerAccountEntriesByUserId(),
+                'billingUserSettings' => $repo->billingUserSettingsByUserId(),
+                'billingUserItems' => $repo->billingUserItemsByUserId(),
+            ]);
+            echo json_encode([
+                'ok' => true,
+                'message' => $message,
+                'account' => $account,
+                'items' => $localUserId > 0 ? ($repo->billingUserItemsByUserId()[$localUserId] ?? []) : [],
+                'html' => ob_get_clean(),
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        if ($action === 'billing_invoice_approve') {
+            $invoiceId = (int)($_POST['invoice_id'] ?? 0);
+            $localUserId = (int)($_POST['user_id'] ?? 0);
+            $message = $billingService->approveInvoice(
+                $invoiceId,
+                (string)($config['app']['admin_user'] ?? 'admin')
+            );
+            if ($localUserId <= 0) {
+                $invoice = $repo->invoice($invoiceId);
+                $localUserId = (int)($invoice['user_id'] ?? 0);
+            }
+            $account = $repo->customerAccountForUser($localUserId);
+            ob_start();
+            render_partial('users_content', [
+                'userGroups' => $repo->usersByServer(),
+                'returnPath' => '/?page=users',
+                'localUsers' => $repo->usersFlat(),
+                'remoteUsersByLocalUserId' => $repo->remoteUsersByLocalUserId(),
+                'domainsByLocalUserId' => $repo->domainsByLocalUserId(),
+                'unassignedRemoteUsers' => $repo->unassignedRemoteUsers(),
+                'localUserDeleteBlockers' => $repo->localUserDeleteBlockersById(),
+                'customerAccountBalances' => $repo->customerAccountBalancesByUserId(),
+                'customerAccountPendingTotals' => $repo->customerAccountPendingTotalsByUserId(),
+                'customerAccountEntries' => $repo->customerAccountEntriesByUserId(),
+                'billingUserSettings' => $repo->billingUserSettingsByUserId(),
+                'billingUserItems' => $repo->billingUserItemsByUserId(),
+            ]);
+            echo json_encode([
+                'ok' => true,
+                'message' => $message,
+                'account' => $account,
+                'html' => ob_get_clean(),
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        if ($action === 'update_user') {
+            $localUserId = (int)($_POST['user_id'] ?? 0);
+            $assignedLocalUserId = (int)($_POST['local_user_id'] ?? 0);
+            if ($localUserId > 0 && $assignedLocalUserId > 0) {
+                $repo->assignRemoteUserToLocalUser($localUserId, $assignedLocalUserId);
+            }
+            $message = $sync->updateUser($localUserId, $_POST);
+            if ($localUserId > 0) {
+                $billingUserId = $repo->billingUserIdForRemoteUser($localUserId);
+                if ($billingUserId > 0) {
+                    $repo->saveBillingUserSettings([
+                        'user_id' => $billingUserId,
+                        'discount_percent' => $_POST['billing_discount_percent'] ?? 0,
+                        'invoice_frequency' => $_POST['billing_invoice_frequency'] ?? 'monthly',
+                    ]);
+                    if (trim((string)($_POST['billing_item_description'] ?? '')) !== '') {
+                        $repo->saveBillingUserItem([
+                            'user_id' => $billingUserId,
+                            'description' => $_POST['billing_item_description'],
+                            'amount' => $_POST['billing_item_amount'] ?? 0,
+                            'tax_rate_id' => $_POST['billing_item_tax_rate_id'] ?? null,
+                            'booking_date' => $_POST['billing_item_booking_date'] ?? date('Y-m-d'),
+                            'frequency' => $_POST['billing_item_frequency'] ?? 'once',
+                            'active' => isset($_POST['billing_item_active']) ? 1 : 0,
+                            'allow_past_booking_date' => $_POST['billing_item_allow_past_booking_date'] ?? 0,
+                        ]);
+                    }
+                }
+            }
+            ob_start();
+            render_partial('users_content', [
+                'userGroups' => $repo->usersByServer(),
+                'returnPath' => '/?page=users',
+                'localUsers' => $repo->usersFlat(),
+                'remoteUsersByLocalUserId' => $repo->remoteUsersByLocalUserId(),
+                'domainsByLocalUserId' => $repo->domainsByLocalUserId(),
+                'unassignedRemoteUsers' => $repo->unassignedRemoteUsers(),
+                'localUserDeleteBlockers' => $repo->localUserDeleteBlockersById(),
+                'customerAccountBalances' => $repo->customerAccountBalancesByUserId(),
+                'customerAccountPendingTotals' => $repo->customerAccountPendingTotalsByUserId(),
+                'customerAccountEntries' => $repo->customerAccountEntriesByUserId(),
                 'billingUserSettings' => $repo->billingUserSettingsByUserId(),
                 'billingUserItems' => $repo->billingUserItemsByUserId(),
             ]);
@@ -225,7 +493,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
                 throw new InvalidArgumentException(t('billing.item_required'));
             }
             $repo->deleteBillingUserItem($itemId);
-            $items = $userId > 0 ? ($repo->billingUserItemsByUserId()[$userId] ?? []) : [];
+            $billingUserId = (int)($_POST['local_user_id'] ?? 0);
+            if ($billingUserId <= 0) {
+                $billingUserId = $userId > 0 ? $repo->billingUserIdForRemoteUser($userId) : 0;
+            }
+            $items = $billingUserId > 0 ? ($repo->billingUserItemsByUserId()[$billingUserId] ?? []) : [];
             echo json_encode([
                 'ok' => true,
                 'message' => t('billing.user_item_deleted'),
@@ -239,6 +511,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
             render_partial('users_content', [
                 'userGroups' => $repo->usersByServer(),
                 'returnPath' => '/?page=users',
+                'localUsers' => $repo->usersFlat(),
+                'remoteUsersByLocalUserId' => $repo->remoteUsersByLocalUserId(),
+                'domainsByLocalUserId' => $repo->domainsByLocalUserId(),
+                'unassignedRemoteUsers' => $repo->unassignedRemoteUsers(),
+                'localUserDeleteBlockers' => $repo->localUserDeleteBlockersById(),
+                'customerAccountBalances' => $repo->customerAccountBalancesByUserId(),
+                'customerAccountPendingTotals' => $repo->customerAccountPendingTotalsByUserId(),
+                'customerAccountEntries' => $repo->customerAccountEntriesByUserId(),
                 'billingUserSettings' => $repo->billingUserSettingsByUserId(),
                 'billingUserItems' => $repo->billingUserItemsByUserId(),
             ]);
@@ -319,15 +599,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
                 'message' => t('message.domain_saved', ['name' => ($domain['domain'] ?? t('common.unknown'))]),
                 'domain' => $domain,
                 'row_class' => domain_row_class($domain),
-                'status_html' => domain_status_html($domain),
+                'status_html' => domain_name_status_html($domain),
             ], JSON_UNESCAPED_UNICODE);
             exit;
         }
         if ($action === 'refresh_domain') {
             $result = $sync->refreshDomain((int)$_POST['id']);
-            if (($result['status'] ?? '') === 'updated' && isset($result['domain'])) {
+            if (isset($result['domain'])) {
                 $result['row_class'] = domain_row_class($result['domain']);
-                $result['status_html'] = domain_status_html($result['domain']);
+                $result['status_html'] = domain_name_status_html($result['domain']);
             }
             echo json_encode(['ok' => true] + $result, JSON_UNESCAPED_UNICODE);
             exit;
@@ -339,6 +619,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
             render_partial('domains_content', [
                 'domains' => $domains,
                 'returnPath' => '/?page=domains',
+                'localUsers' => $repo->usersFlat(),
                 'billingDomainOverrides' => $repo->billingDomainOverridesByDomainId(),
                 'billingTaxRates' => $repo->billingTaxRates(),
             ]);
@@ -407,6 +688,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'update_package' => $sync->updateHostingPackage($_POST),
             'delete_package' => $sync->deleteHostingPackage((int)($_POST['id'] ?? 0)),
             'import_users' => $sync->importUsers(),
+            'create_local_user' => (function () use ($repo): string {
+                $id = $repo->createLocalUser($_POST);
+                return t('message.local_user_created', ['name' => ($_POST['display_name'] ?? ('#' . $id))]);
+            })(),
+            'update_local_user' => (function () use ($repo): string {
+                $repo->updateLocalUser($_POST);
+                return t('message.local_user_updated', ['name' => ($_POST['display_name'] ?? t('common.unknown'))]);
+            })(),
+            'assign_remote_user' => (function () use ($repo): string {
+                $remoteUserId = (int)($_POST['remote_user_id'] ?? 0);
+                $localUserId = (int)($_POST['local_user_id'] ?? 0);
+                if ($remoteUserId <= 0 || $localUserId <= 0) {
+                    throw new InvalidArgumentException(t('users.local_user_required'));
+                }
+                $repo->assignRemoteUserToLocalUser($remoteUserId, $localUserId);
+                return t('message.remote_user_assigned');
+            })(),
+            'create_local_user_from_remote' => (function () use ($repo): string {
+                $repo->createLocalUserFromRemoteUser((int)($_POST['remote_user_id'] ?? 0));
+                return t('message.local_user_created', ['name' => ($_POST['remote_user_name'] ?? t('common.unknown'))]);
+            })(),
+            'delete_local_user' => (function () use ($repo): string {
+                $repo->deleteLocalUser((int)($_POST['id'] ?? 0));
+                return t('message.local_user_deleted');
+            })(),
             'create_user' => $sync->createUser((int)($_POST['server_id'] ?? 0), $_POST),
             'queue_user' => (function () use ($repo): string {
                 $repo->queue('create_user', ($_POST['server_id'] ?? '') !== '' ? (int)$_POST['server_id'] : null, $_POST);
@@ -460,10 +766,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 return t('billing.domain_override_saved');
             })(),
             'billing_invoice_send' => $billingService->approveAndSend((int)($_POST['invoice_id'] ?? 0), (string)($config['app']['admin_user'] ?? 'admin')),
+            'billing_invoice_approve' => $billingService->approveInvoice((int)($_POST['invoice_id'] ?? 0), (string)($config['app']['admin_user'] ?? 'admin')),
             'billing_invoice_queue' => $billingService->queueInvoice((int)($_POST['invoice_id'] ?? 0), (string)($config['app']['admin_user'] ?? 'admin')),
             'billing_invoice_cancel' => $billingService->cancelInvoice((int)($_POST['invoice_id'] ?? 0), (string)($config['app']['admin_user'] ?? 'admin')),
             'billing_invoice_delete' => $billingService->deleteInvoice((int)($_POST['invoice_id'] ?? 0), (string)($config['app']['admin_user'] ?? 'admin')),
             'billing_invoice_requeue' => $billingService->requeueCancelledInvoice((int)($_POST['invoice_id'] ?? 0), (string)($config['app']['admin_user'] ?? 'admin')),
+            'billing_customer_payment' => $billingService->recordCustomerPayment((int)($_POST['user_id'] ?? 0), $_POST, (string)($config['app']['admin_user'] ?? 'admin')),
             'billing_send_queue' => $billingService->sendQueued((string)($config['app']['admin_user'] ?? 'admin')),
             default => throw new RuntimeException('Unknown action.'),
         };
@@ -523,6 +831,14 @@ render_template('app', [
     'userGroups' => $userGroups,
     'packages' => $packages,
     'billingData' => $billingData,
+    'localUsers' => $repo->usersFlat(),
+    'remoteUsersByLocalUserId' => $repo->remoteUsersByLocalUserId(),
+    'domainsByLocalUserId' => $repo->domainsByLocalUserId(),
+    'unassignedRemoteUsers' => $repo->unassignedRemoteUsers(),
+    'localUserDeleteBlockers' => $repo->localUserDeleteBlockersById(),
+    'customerAccountBalances' => $repo->customerAccountBalancesByUserId(),
+    'customerAccountPendingTotals' => $repo->customerAccountPendingTotalsByUserId(),
+    'customerAccountEntries' => $repo->customerAccountEntriesByUserId(),
     'actions' => $actions,
     'serverRefreshInterval' => $serverRefreshInterval,
     'serverRefreshIntervalOptions' => $serverRefreshIntervalOptions,

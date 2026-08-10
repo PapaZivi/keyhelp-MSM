@@ -28,14 +28,11 @@ $billingFrequencyLabel = static function (?string $frequency): string {
             <thead>
                 <tr>
                     <th><?= h(t('domains.domain')) ?></th>
-                    <th><?= h(t('domains.server')) ?></th>
                     <th><?= h(t('domains.owner')) ?></th>
                     <th><?= h(t('domains.registered')) ?></th>
                     <th><?= h(t('domains.next_billing')) ?></th>
                     <th><?= h(t('domains.billing_frequency')) ?></th>
                     <th><?= h(t('domains.registrar')) ?></th>
-                    <th><?= h(t('domains.deletion')) ?></th>
-                    <th><?= h(t('domains.subdomains')) ?></th>
                     <th></th>
                 </tr>
             </thead>
@@ -43,24 +40,42 @@ $billingFrequencyLabel = static function (?string $frequency): string {
                 <?php foreach ($domains as $domain): ?>
                 <?php $domainPayload = $domain; $domainPayload['_billing_override'] = $billingDomainOverrides[(int)$domain['id']] ?? []; ?>
                 <tr class="domain-row <?= h(domain_row_class($domain)) ?>" data-domain-id="<?= (int)$domain['id'] ?>" data-domain-name="<?= h($domain['domain']) ?>" data-domain-json="<?= h(json_encode($domainPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?>">
-                    <td><span class="name-with-status"><span class="domain-name-text"><?= h($domain['domain']) ?></span><?= domain_name_status_html($domain) ?></span></td>
-                    <td><?= h($domain['server_name']) ?></td>
-                    <td><?= h($domain['owner_name'] ?: ($domain['owner_external_id'] ? 'User #' . $domain['owner_external_id'] : '')) ?></td>
+                    <td>
+                        <div class="domain-name-wrap">
+                            <button
+                                type="button"
+                                class="btn btn-link btn-sm icon-only status-tooltip subdomain-toggle"
+                                data-server-id="<?= (int)$domain['server_id'] ?>"
+                                data-domain="<?= h($domain['domain']) ?>"
+                                <?= icon_button_attrs(t('domains.subdomains')) ?>
+                            >
+                                <?= icon_svg('plus') ?>
+                            </button>
+                            <span class="domain-name-stack">
+                                <span class="name-with-status">
+                                    <span class="domain-name-text"><?= h($domain['domain']) ?></span>
+                                    <span class="domain-status-icons"><?= domain_name_status_html($domain) ?></span>
+                                </span>
+                                <span class="domain-server-hint"><?= h($domain['server_name']) ?></span>
+                            </span>
+                        </div>
+                    </td>
+                    <td data-domain-cell="owner">
+                        <?= h($domain['local_user_name'] ?: ($domain['owner_name'] ?: ($domain['owner_external_id'] ? 'User #' . $domain['owner_external_id'] : ''))) ?>
+                    </td>
                     <td data-domain-cell="registered_at"><?= h(format_date_local($domain['registered_at'] ?? '')) ?></td>
                     <td data-domain-cell="next_billing_at"><?= h(format_date_local($domain['next_billing_at'] ?? '')) ?></td>
                     <td data-domain-cell="billing_frequency"><?= h($billingFrequencyLabel($domain['billing_frequency'] ?? 'yearly')) ?></td>
                     <td data-domain-cell="registrar"><?= h($domain['registrar'] ?? '') ?></td>
-                    <td class="domain-status-cell"><?= domain_status_html($domain) ?></td>
-                    <td><button type="button" class="btn btn-outline-secondary btn-sm icon-only status-tooltip subdomain-toggle" data-server-id="<?= (int)$domain['server_id'] ?>" data-domain="<?= h($domain['domain']) ?>"<?= icon_button_attrs(t('common.show')) ?>><?= icon_svg('eye') ?></button></td>
                     <td>
                         <div class="domain-actions">
-                            <button type="button" class="btn btn-outline-secondary btn-sm icon-only status-tooltip domain-refresh"<?= icon_button_attrs(t('domains.refresh')) ?>><?= icon_svg('refresh') ?></button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm icon-only status-tooltip domain-settings-open" data-bs-toggle="modal" data-bs-target="#domainSettingsModal"<?= icon_button_attrs(t('common.edit')) ?>><?= icon_svg('edit') ?></button>
+                            <button type="button" class="btn btn-link btn-sm icon-only status-tooltip domain-settings-open" data-bs-toggle="modal" data-bs-target="#domainSettingsModal"<?= icon_button_attrs(t('common.edit')) ?>><?= icon_svg('edit') ?></button>
+                            <button type="button" class="btn btn-link btn-sm icon-only status-tooltip domain-refresh"<?= icon_button_attrs(t('domains.refresh')) ?>><?= icon_svg('refresh') ?></button>
                         </div>
                     </td>
                 </tr>
                 <tr class="subdomain-row" id="subdomains-<?= (int)$domain['id'] ?>" hidden>
-                    <td colspan="10"><div class="subdomain-box"><?= h(t('common.loading')) ?></div></td>
+                    <td colspan="7"><div class="subdomain-box"><?= h(t('common.loading')) ?></div></td>
                 </tr>
                 <?php endforeach; ?>
             </tbody>
@@ -100,6 +115,17 @@ $billingFrequencyLabel = static function (?string $frequency): string {
                                     </label>
                                     <label class="form-label"><?= h(t('domains.last_change')) ?><input class="form-control" name="last_change_at" type="date"></label>
                                     <label class="form-label"><?= h(t('domains.registrar')) ?><input class="form-control" name="registrar"></label>
+                                    <label class="form-label">
+                                        <?= h(t('users.local_user')) ?>
+                                        <select class="form-select" name="local_user_id">
+                                            <option value=""><?= h(t('common.unknown')) ?></option>
+                                            <?php foreach (($localUsers ?? []) as $localUser): ?>
+                                            <option value="<?= (int)$localUser['id'] ?>">
+                                                <?= h($localUser['username'] ?? '') ?>
+                                            </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </label>
                                 </div>
                             </div>
                             <div class="tab-pane fade" id="domain-tab-billing" role="tabpanel">

@@ -9,12 +9,7 @@ $pendingItems = $billing['pendingItems'] ?? [];
 $invoices = $billing['invoices'] ?? [];
 $settings = $billing['settings'] ?? [];
 $domains = $domains ?? [];
-$users = [];
-foreach ($userGroups as $group) {
-    foreach (($group['users'] ?? []) as $user) {
-        $users[] = $user;
-    }
-}
+$users = $billing['users'] ?? [];
 $billingFrequencyLabel = static function (?string $frequency): string {
     $key = $frequency === 'halfyearly' ? 'semiannual' : ($frequency ?: 'yearly');
     return t('billing.frequency_' . $key);
@@ -67,11 +62,23 @@ $taxOptions = static function (array $taxRates, mixed $selected = null): void {
                         <?php foreach ($invoices as $invoice): ?>
                         <tr>
                             <td><?= h($invoice['invoice_number']) ?></td>
-                            <td><?= h($invoice['server_name'] . ' / ' . $invoice['username']) ?></td>
+                            <td><?= h(trim((string)($invoice['server_name'] ?? '')) !== '' ? $invoice['server_name'] . ' / ' . $invoice['username'] : $invoice['username']) ?></td>
                             <td>
+                                <?php $isPaid = (float)($invoice['open_total'] ?? $invoice['total'] ?? 0) <= 0 && (float)($invoice['paid_total'] ?? 0) > 0; ?>
+                                <?php if (!$isPaid): ?>
                                 <span class="billing-status billing-status-<?= h($invoice['status']) ?>">
                                     <?= h(t('billing.status_' . $invoice['status'])) ?>
                                 </span>
+                                <?php endif; ?>
+                                <?php if ($isPaid): ?>
+                                <span class="billing-status billing-status-paid">
+                                    <?= h(t('billing.paid')) ?>
+                                </span>
+                                <?php elseif ((float)($invoice['paid_total'] ?? 0) > 0): ?>
+                                <span class="billing-status billing-status-partial">
+                                    <?= h(t('billing.partially_paid', ['amount' => (string)($invoice['paid_total'] ?? '0.00')])) ?>
+                                </span>
+                                <?php endif; ?>
                             </td>
                             <td><?= h($invoice['total']) ?></td>
                             <td class="billing-actions">
@@ -82,6 +89,18 @@ $taxOptions = static function (array $taxRates, mixed $selected = null): void {
                                 >
                                     <?= h(t('billing.view_invoice')) ?>
                                 </a>
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-success invoice-payment-open"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#invoicePaymentModal"
+                                    data-invoice-id="<?= (int)$invoice['id'] ?>"
+                                    data-user-id="<?= (int)$invoice['user_id'] ?>"
+                                    data-invoice-number="<?= h($invoice['invoice_number']) ?>"
+                                    data-open-total="<?= h((string)($invoice['open_total'] ?? $invoice['total'] ?? '')) ?>"
+                                >
+                                    <?= h(t('billing.mark_paid')) ?>
+                                </button>
                                 <?php if (!in_array($invoice['status'], ['sent', 'cancelled'], true)): ?>
                                 <form method="post">
                                     <input type="hidden" name="_action" value="billing_invoice_send">
@@ -143,9 +162,9 @@ $taxOptions = static function (array $taxRates, mixed $selected = null): void {
                         <?php foreach ($users as $user): ?>
                         <option
                             value="<?= (int)$user['id'] ?>"
-                            data-owner-key="<?= h((int)$user['server_id'] . ':' . (string)$user['external_id']) ?>"
+                            data-owner-key="<?= (int)$user['id'] ?>"
                         >
-                            <?= h(($user['server_name'] ?? '') . ' / ' . ($user['username'] ?? '')) ?>
+                            <?= h($user['username'] ?? '') ?>
                         </option>
                         <?php endforeach; ?>
                     </select>
@@ -173,9 +192,10 @@ $taxOptions = static function (array $taxRates, mixed $selected = null): void {
                     <?= h(t('domains.title')) ?>
                     <select class="form-select" name="domain_ids[]" multiple size="8" data-backbill-domains required>
                         <?php foreach ($domains as $domain): ?>
+                        <?php if (!empty($domain['is_deleted'])) { continue; } ?>
                         <option
                             value="<?= (int)$domain['id'] ?>"
-                            data-owner-key="<?= h((int)$domain['server_id'] . ':' . (string)($domain['owner_external_id'] ?? '')) ?>"
+                            data-owner-key="<?= (int)($domain['local_user_id'] ?? 0) ?>"
                         >
                             <?= h(
                                 ($domain['server_name'] ?? '')
@@ -213,7 +233,7 @@ $taxOptions = static function (array $taxRates, mixed $selected = null): void {
                         <?php foreach ($pendingItems as $item): ?>
                         <?php [$description, $description2] = $splitDescription((string)($item['description'] ?? '')); ?>
                         <tr>
-                            <td><?= h($item['server_name'] . ' / ' . $item['username']) ?></td>
+                            <td><?= h(trim((string)($item['server_name'] ?? '')) !== '' ? $item['server_name'] . ' / ' . $item['username'] : $item['username']) ?></td>
                             <td>
                                 <?= h($description) ?>
                                 <?php if ($description2 !== ''): ?>
