@@ -58,11 +58,14 @@ body { background: var(--kh-soft); }
     width: min(218px, 100%);
 }
 .auth-logo-wrap {
+    align-items: center;
     display: flex;
     justify-content: center;
     margin-bottom: 1.25rem;
+    min-height: 92px;
 }
 .app-logo-auth {
+    max-height: 92px;
     width: min(270px, 82vw);
 }
 .side-nav { align-content: start; gap: .25rem; }
@@ -102,14 +105,39 @@ body { background: var(--kh-soft); }
 .layout { max-width: 1420px; padding: 1.625rem; }
 
 .login-screen {
-    min-height: 100vh;
-    display: grid;
-    place-items: center;
-    padding: 1.5rem;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 100svh;
+    overflow: hidden;
 }
-.login-card { width: min(430px, 100%); }
+.login-viewport {
+    height: 100vh;
+    height: 100dvh;
+    inset: 0;
+    padding: 1.5rem;
+    position: fixed;
+}
+.login-card {
+    left: calc(50% - .5px);
+    max-height: calc(100dvh - 3rem);
+    overflow-y: auto;
+    position: fixed;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(430px, 100%);
+    z-index: 2;
+}
 .login-card .brand-mark { width: 42px; height: 42px; }
-.login-language { position: fixed; top: 1rem; right: 1rem; }
+.login-language {
+    position: fixed;
+    right: 1rem;
+    top: 1rem;
+    width: min(260px, calc(100vw - 2rem));
+    z-index: 5;
+}
+.login-language .form-select {
+    font-weight: 700;
+}
 .stack { display: grid; gap: .75rem; }
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .icon-only {
@@ -345,19 +373,29 @@ body { background: var(--kh-soft); }
 .remote-assignment-editor .form-select {
     min-width: 180px;
 }
-.modal-dialog-scrollable .ajax-user-create-form {
+.modal-dialog-scrollable .ajax-user-create-form,
+.modal-dialog-scrollable .ajax-local-user-form,
+.modal-dialog-scrollable .ajax-remote-user-wizard-form {
     max-height: inherit;
     min-height: 0;
     display: flex;
     flex-direction: column;
 }
 .modal-dialog-scrollable .ajax-user-create-form .modal-header,
-.modal-dialog-scrollable .ajax-user-create-form .modal-footer {
+.modal-dialog-scrollable .ajax-user-create-form .modal-footer,
+.modal-dialog-scrollable .ajax-local-user-form .modal-header,
+.modal-dialog-scrollable .ajax-local-user-form .modal-footer,
+.modal-dialog-scrollable .ajax-remote-user-wizard-form .modal-header,
+.modal-dialog-scrollable .ajax-remote-user-wizard-form .modal-footer {
     flex: 0 0 auto;
 }
-.modal-dialog-scrollable .ajax-user-create-form .modal-body {
+.modal-dialog-scrollable .ajax-user-create-form .modal-body,
+.modal-dialog-scrollable .ajax-local-user-form .modal-body,
+.modal-dialog-scrollable .ajax-remote-user-wizard-form .modal-body {
     min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
 }
 .user-create-tabs { flex-wrap: nowrap; overflow-x: auto; }
 .tab-api-readonly { color: var(--bs-secondary-color) !important; opacity: .6; }
@@ -660,4 +698,70 @@ body { background: var(--kh-soft); }
     .billing-inline-form,
     .template-editor-grid { grid-template-columns: 1fr; }
     .billing-toolbar { align-items: stretch; }
+}
+
+@media (max-width: 575.98px) {
+    .modal-dialog-scrollable {
+        height: calc(100dvh - 1rem);
+        margin: .5rem;
+        max-height: calc(100dvh - 1rem);
+    }
+    .modal-dialog-scrollable .modal-content {
+        max-height: calc(100dvh - 1rem);
+    }
+    .modal-dialog-scrollable .modal-header,
+    .modal-dialog-scrollable .modal-footer {
+        padding: .875rem 1rem;
+    }
+    .modal-dialog-scrollable .modal-body {
+        padding: 1rem;
+    }
+    .modal-dialog-scrollable .modal-title {
+        font-size: clamp(1.2rem, 7vw, 1.65rem);
+        line-height: 1.15;
+    }
+    .user-create-tabs {
+        margin-inline: -1rem;
+        padding-inline: 1rem;
+        scrollbar-width: thin;
+    }
+    .user-create-tabs .nav-link {
+        white-space: nowrap;
+    }
+    #local-user-tab-account > .billing-form-grid:first-child {
+        gap: .55rem;
+    }
+    #local-user-tab-account .metric-card strong {
+        font-size: clamp(1.8rem, 10vw, 2.55rem);
+        word-break: break-word;
+    }
+    #local-user-tab-account .metric-card span {
+        font-size: .95rem;
+    }
+    #local-user-tab-account .grid-full.d-flex {
+        flex-wrap: nowrap !important;
+        margin-inline: -1rem;
+        overflow-x: auto;
+        padding: .1rem 1rem .45rem;
+        scrollbar-width: thin;
+    }
+    #local-user-tab-account .grid-full.d-flex .btn {
+        flex: 0 0 auto;
+        white-space: nowrap;
+    }
+    .billing-existing-items {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    .login-viewport {
+        padding: 4.5rem 1rem 1rem;
+    }
+    .login-card {
+        left: 1rem;
+        max-height: calc(100dvh - 5.5rem);
+        top: 4.5rem;
+        transform: none;
+        width: 100%;
+        width: calc(100vw - 2rem);
+    }
 }
