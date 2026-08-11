@@ -574,6 +574,9 @@ final class BillingService
         $created = 0;
         foreach ($this->repo->billingUsersWithPendingItems() as $user) {
             $settings = $this->repo->billingUserSetting((int)$user['id']);
+            if (!$this->userInvoiceRunIsDue($settings, $now)) {
+                continue;
+            }
             $invoice = $this->createInvoiceFromPendingItems($user, $lastRun, $now, $actor, true);
             if (!$invoice) {
                 continue;
@@ -582,6 +585,23 @@ final class BillingService
             $created++;
         }
         return $created;
+    }
+
+    private function userInvoiceRunIsDue(array $settings, DateTimeImmutable $now): bool
+    {
+        $frequency = (string)($settings['invoice_frequency'] ?? 'monthly');
+        if ($frequency === 'immediate') {
+            $frequency = 'daily';
+        }
+        if ($frequency === 'daily') {
+            return true;
+        }
+        if ($frequency === 'weekly') {
+            $weekday = max(1, min(7, (int)$this->repo->billingSetting('weekly_invoice_weekday', '1')));
+            return (int)$now->format('N') === $weekday;
+        }
+        $day = max(1, min(28, (int)$this->repo->billingSetting('monthly_invoice_day', '1')));
+        return (int)$now->format('j') === $day;
     }
 
     private function requeueInvoiceItems(int $invoiceId, string $actor): int

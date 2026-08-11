@@ -442,28 +442,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
                 $repo->assignRemoteUserToLocalUser($localUserId, $assignedLocalUserId);
             }
             $message = $sync->updateUser($localUserId, $_POST);
-            if ($localUserId > 0) {
-                $billingUserId = $repo->billingUserIdForRemoteUser($localUserId);
-                if ($billingUserId > 0) {
-                    $repo->saveBillingUserSettings([
-                        'user_id' => $billingUserId,
-                        'discount_percent' => $_POST['billing_discount_percent'] ?? 0,
-                        'invoice_frequency' => $_POST['billing_invoice_frequency'] ?? 'monthly',
-                    ]);
-                    if (trim((string)($_POST['billing_item_description'] ?? '')) !== '') {
-                        $repo->saveBillingUserItem([
-                            'user_id' => $billingUserId,
-                            'description' => $_POST['billing_item_description'],
-                            'amount' => $_POST['billing_item_amount'] ?? 0,
-                            'tax_rate_id' => $_POST['billing_item_tax_rate_id'] ?? null,
-                            'booking_date' => $_POST['billing_item_booking_date'] ?? date('Y-m-d'),
-                            'frequency' => $_POST['billing_item_frequency'] ?? 'once',
-                            'active' => isset($_POST['billing_item_active']) ? 1 : 0,
-                            'allow_past_booking_date' => $_POST['billing_item_allow_past_booking_date'] ?? 0,
-                        ]);
-                    }
-                }
-            }
             ob_start();
             render_partial('users_content', [
                 'userGroups' => $repo->usersByServer(),

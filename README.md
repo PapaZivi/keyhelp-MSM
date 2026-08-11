@@ -114,6 +114,14 @@ It manages:
 
 The global billing run starts from the billing page. A user-specific billing run can be started from the local user's customer account tab.
 
+For automated billing, run the CLI script from cron:
+
+```bash
+/usr/bin/php /home/users/keyhelpmsm/www/khmsm.example.com/bin/billing-cron.php
+```
+
+The cron job collects due items, creates invoices according to the local user's invoice frequency and billing cut-off settings, and sends invoices that were already queued for batch sending.
+
 Invoice PDFs are stored in:
 
 ```text

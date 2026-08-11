@@ -139,6 +139,11 @@ body { background: var(--kh-soft); }
     font-weight: 700;
 }
 .stack { display: grid; gap: .75rem; }
+.metric-card .metric-detail {
+    color: var(--bs-secondary-color);
+    font-size: .85rem;
+    margin-top: .25rem;
+}
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .icon-only {
     width: 2.25rem;
@@ -373,25 +378,17 @@ body { background: var(--kh-soft); }
 .remote-assignment-editor .form-select {
     min-width: 180px;
 }
-.modal-dialog-scrollable .ajax-user-create-form,
-.modal-dialog-scrollable .ajax-local-user-form,
-.modal-dialog-scrollable .ajax-remote-user-wizard-form {
+.modal-dialog-scrollable .modal-content > form {
     max-height: inherit;
     min-height: 0;
     display: flex;
     flex-direction: column;
 }
-.modal-dialog-scrollable .ajax-user-create-form .modal-header,
-.modal-dialog-scrollable .ajax-user-create-form .modal-footer,
-.modal-dialog-scrollable .ajax-local-user-form .modal-header,
-.modal-dialog-scrollable .ajax-local-user-form .modal-footer,
-.modal-dialog-scrollable .ajax-remote-user-wizard-form .modal-header,
-.modal-dialog-scrollable .ajax-remote-user-wizard-form .modal-footer {
+.modal-dialog-scrollable .modal-content > form > .modal-header,
+.modal-dialog-scrollable .modal-content > form > .modal-footer {
     flex: 0 0 auto;
 }
-.modal-dialog-scrollable .ajax-user-create-form .modal-body,
-.modal-dialog-scrollable .ajax-local-user-form .modal-body,
-.modal-dialog-scrollable .ajax-remote-user-wizard-form .modal-body {
+.modal-dialog-scrollable .modal-content > form > .modal-body {
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -701,6 +698,13 @@ body { background: var(--kh-soft); }
 }
 
 @media (max-width: 575.98px) {
+    input,
+    select,
+    textarea,
+    .form-control,
+    .form-select {
+        font-size: 16px;
+    }
     .modal-dialog-scrollable {
         height: calc(100dvh - 1rem);
         margin: .5rem;

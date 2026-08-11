@@ -288,14 +288,50 @@ final class SyncService
             $payload['id_hosting_plan'] = $hostingPlanId;
         }
 
-        foreach (['suspend_on' => 'lock_on', 'delete_on' => 'delete_on'] as $apiField => $formField) {
-            $value = trim((string)($data[$formField] ?? ''));
-            if ($value !== '') {
-                $payload[$apiField] = $value;
+        $lockOn = $this->keyHelpDateExpression($data['lock_on'] ?? null);
+        if ($lockOn !== null) {
+            if ($this->dateIsTodayOrPast($lockOn)) {
+                $payload['is_suspended'] = true;
+            } else {
+                $payload['suspend_on'] = $lockOn;
             }
+        }
+        $deleteOn = $this->keyHelpDateExpression($data['delete_on'] ?? null);
+        if ($deleteOn !== null) {
+            $payload['delete_on'] = $deleteOn;
         }
 
         return $payload;
+    }
+
+    private function keyHelpDateExpression(mixed $value): ?string
+    {
+        $value = trim((string)($value ?? ''));
+        if ($value === '') {
+            return null;
+        }
+        try {
+            $timezone = new DateTimeZone((string)($this->config['app']['timezone'] ?? 'Europe/Berlin'));
+            $date = DateTimeImmutable::createFromFormat('!Y-m-d', $value, $timezone);
+            if ($date instanceof DateTimeImmutable) {
+                return $date->format('Y-m-d');
+            }
+            return (new DateTimeImmutable($value, $timezone))->format('Y-m-d');
+        } catch (Throwable) {
+            return $value;
+        }
+    }
+
+    private function dateIsTodayOrPast(string $value): bool
+    {
+        try {
+            $timezone = new DateTimeZone((string)($this->config['app']['timezone'] ?? 'Europe/Berlin'));
+            $date = (new DateTimeImmutable($value, $timezone))->setTime(0, 0);
+            $today = (new DateTimeImmutable('today', $timezone))->setTime(0, 0);
+            return $date <= $today;
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     private function phpOnlyPayload(array $data): array

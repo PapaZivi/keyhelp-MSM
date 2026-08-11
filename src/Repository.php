@@ -582,6 +582,10 @@ final class Repository
         if ($name === '') {
             $name = t('common.unknown');
         }
+        $customerNumber = trim((string)($data['customer_number'] ?? ''));
+        if ($customerNumber === '') {
+            $customerNumber = $this->nextCustomerNumber();
+        }
         $stmt = $this->pdo->prepare('
             INSERT INTO local_users(
                 display_name, email, invoice_email, customer_number, company, first_name, last_name, phone,
@@ -592,7 +596,7 @@ final class Repository
             $name,
             trim((string)($data['email'] ?? '')) ?: null,
             trim((string)($data['invoice_email'] ?? '')) ?: null,
-            trim((string)($data['customer_number'] ?? '')) ?: null,
+            $customerNumber,
             trim((string)($data['company'] ?? '')) ?: null,
             trim((string)($data['first_name'] ?? '')) ?: null,
             trim((string)($data['last_name'] ?? '')) ?: null,
@@ -614,6 +618,10 @@ final class Repository
         if ($id <= 0 || $name === '') {
             throw new InvalidArgumentException(t('users.local_user_required'));
         }
+        $customerNumber = trim((string)($data['customer_number'] ?? ''));
+        if ($customerNumber === '') {
+            $customerNumber = $this->nextCustomerNumber($id);
+        }
         $stmt = $this->pdo->prepare('
             UPDATE local_users
             SET display_name = ?, email = ?, invoice_email = ?, customer_number = ?, company = ?, first_name = ?,
@@ -625,7 +633,7 @@ final class Repository
             $name,
             trim((string)($data['email'] ?? '')) ?: null,
             trim((string)($data['invoice_email'] ?? '')) ?: null,
-            trim((string)($data['customer_number'] ?? '')) ?: null,
+            $customerNumber,
             trim((string)($data['company'] ?? '')) ?: null,
             trim((string)($data['first_name'] ?? '')) ?: null,
             trim((string)($data['last_name'] ?? '')) ?: null,
@@ -638,6 +646,19 @@ final class Repository
             trim((string)($data['notes'] ?? '')) ?: null,
             $id,
         ]);
+    }
+
+    private function nextCustomerNumber(?int $excludeUserId = null): string
+    {
+        $sql = "SELECT MAX(CAST(customer_number AS UNSIGNED)) FROM local_users WHERE customer_number REGEXP '^[0-9]+$'";
+        $params = [];
+        if ($excludeUserId !== null && $excludeUserId > 0) {
+            $sql .= ' AND id <> ?';
+            $params[] = $excludeUserId;
+        }
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        return (string)(((int)$stmt->fetchColumn()) + 1);
     }
 
     public function createLocalUserFromRemoteUser(int $remoteUserId): int
@@ -1050,6 +1071,8 @@ final class Repository
         $this->saveBillingSetting('invoice_sender', trim((string)($data['invoice_sender'] ?? '')));
         $this->saveBillingSetting('invoice_notification_recipients', trim((string)($data['invoice_notification_recipients'] ?? '')));
         $this->saveBillingSetting('payment_account_details', trim((string)($data['payment_account_details'] ?? '')));
+        $this->saveBillingSetting('weekly_invoice_weekday', (string)max(1, min(7, (int)($data['weekly_invoice_weekday'] ?? 1))));
+        $this->saveBillingSetting('monthly_invoice_day', (string)max(1, min(28, (int)($data['monthly_invoice_day'] ?? 1))));
         $this->saveBillingSetting('invoice_number_format', $format);
         $this->saveBillingSetting('invoice_template_html', (string)($data['invoice_template_html'] ?? InvoicePdfRenderer::defaultTemplate()));
         $this->saveBillingSetting('dunning_template_html', (string)($data['dunning_template_html'] ?? InvoicePdfRenderer::defaultDunningTemplate()));
@@ -1063,6 +1086,8 @@ final class Repository
                 'invoice_sender' => $this->billingSetting('invoice_sender', ''),
                 'invoice_notification_recipients' => $this->billingSetting('invoice_notification_recipients', ''),
                 'payment_account_details' => $this->billingSetting('payment_account_details', ''),
+                'weekly_invoice_weekday' => $this->billingSetting('weekly_invoice_weekday', '1'),
+                'monthly_invoice_day' => $this->billingSetting('monthly_invoice_day', '1'),
                 'invoice_number_format' => $this->billingSetting('invoice_number_format', '{{JAHR}}{{MONAT}}{{TAG}}-{{LFNR}}'),
                 'invoice_template_html' => $this->billingSetting('invoice_template_html', InvoicePdfRenderer::defaultTemplate()),
                 'dunning_template_html' => $this->billingSetting('dunning_template_html', InvoicePdfRenderer::defaultDunningTemplate()),
@@ -1213,6 +1238,9 @@ final class Repository
         $stmt = $this->pdo->prepare('SELECT * FROM billing_user_settings WHERE user_id = ?');
         $stmt->execute([$userId]);
         $row = $stmt->fetch();
+        if ($row && (string)($row['invoice_frequency'] ?? '') === 'immediate') {
+            $row['invoice_frequency'] = 'daily';
+        }
         return $row ?: ['user_id' => $userId, 'discount_percent' => 0, 'invoice_frequency' => 'monthly', 'last_invoice_at' => null, 'next_invoice_at' => null];
     }
 
@@ -1223,7 +1251,10 @@ final class Repository
             throw new RuntimeException(t('billing.user_required'));
         }
         $frequency = (string)($data['invoice_frequency'] ?? 'monthly');
-        if (!in_array($frequency, ['immediate', 'weekly', 'monthly'], true)) {
+        if ($frequency === 'immediate') {
+            $frequency = 'daily';
+        }
+        if (!in_array($frequency, ['daily', 'weekly', 'monthly'], true)) {
             $frequency = 'monthly';
         }
         $stmt = $this->pdo->prepare('INSERT INTO billing_user_settings(user_id, discount_percent, invoice_frequency) VALUES(?, ?, ?) ON DUPLICATE KEY UPDATE discount_percent = VALUES(discount_percent), invoice_frequency = VALUES(invoice_frequency)');
@@ -1233,7 +1264,11 @@ final class Repository
 
     public function updateUserInvoiceSchedule(int $userId, string $frequency, DateTimeImmutable $now): void
     {
+        if ($frequency === 'immediate') {
+            $frequency = 'daily';
+        }
         $next = match ($frequency) {
+            'daily' => $now->modify('+1 day')->format('Y-m-d'),
             'weekly' => $now->modify('+1 week')->format('Y-m-d'),
             'monthly' => $now->modify('+1 month')->format('Y-m-d'),
             default => $now->format('Y-m-d'),

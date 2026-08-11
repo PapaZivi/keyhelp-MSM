@@ -113,7 +113,14 @@
                                     <?= h(t('billing.user_discount')) ?>
                                     <input class="form-control" name="billing_discount_percent" type="number" step="0.001" min="0" max="100" value="0">
                                 </label>
-                                <input type="hidden" name="billing_invoice_frequency" value="monthly">
+                                <label class="form-label">
+                                    <?= h(t('billing.invoice_frequency')) ?>
+                                    <select class="form-select" name="billing_invoice_frequency">
+                                        <option value="daily"><?= h(t('billing.frequency_daily')) ?></option>
+                                        <option value="weekly"><?= h(t('billing.frequency_weekly')) ?></option>
+                                        <option value="monthly" selected><?= h(t('billing.frequency_monthly')) ?></option>
+                                    </select>
+                                </label>
                             </div>
                         </div>
 

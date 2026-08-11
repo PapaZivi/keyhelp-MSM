@@ -122,6 +122,30 @@ $taxOptions = static function (array $taxRates, mixed $selected = null): void {
                             ><?= h($settings['payment_account_details'] ?? '') ?></textarea>
                         </label>
                         <label class="form-label">
+                            <?= h(t('billing.weekly_invoice_weekday')) ?>
+                            <select class="form-select" name="weekly_invoice_weekday">
+                                <?php for ($weekday = 1; $weekday <= 7; $weekday++): ?>
+                                <option
+                                    value="<?= $weekday ?>"
+                                    <?= (string)$weekday === (string)($settings['weekly_invoice_weekday'] ?? '1') ? 'selected' : '' ?>
+                                >
+                                    <?= h(t('billing.weekday_' . $weekday)) ?>
+                                </option>
+                                <?php endfor; ?>
+                            </select>
+                        </label>
+                        <label class="form-label">
+                            <?= h(t('billing.monthly_invoice_day')) ?>
+                            <input
+                                class="form-control"
+                                name="monthly_invoice_day"
+                                type="number"
+                                min="1"
+                                max="28"
+                                value="<?= h((string)($settings['monthly_invoice_day'] ?? '1')) ?>"
+                            >
+                        </label>
+                        <label class="form-label">
                             <?= h(t('billing.invoice_number_format')) ?>
                             <input
                                 class="form-control"

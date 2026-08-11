@@ -114,6 +114,14 @@ Es verwaltet:
 
 Der globale Rechnungslauf wird auf der Abrechnungsseite gestartet. Ein benutzerspezifischer Rechnungslauf kann im Kundenkonto-Tab eines lokalen Benutzers gestartet werden.
 
+Für automatische Rechnungsläufe kann das CLI-Script per Cron ausgeführt werden:
+
+```bash
+/usr/bin/php /home/users/keyhelpmsm/www/khmsm.example.com/bin/billing-cron.php
+```
+
+Der Cronjob sammelt fällige Posten, erstellt Rechnungen anhand der Rechnungshäufigkeit des lokalen Benutzers und der eingestellten Stichtage, und versendet Rechnungen, die bereits für den Sammelversand vorgemerkt wurden.
+
 Rechnungs-PDFs werden hier gespeichert:
 
 ```text

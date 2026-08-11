@@ -1,6 +1,6 @@
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <title><?= h($title ?? $config['app']['name']) ?></title>
     <link rel="icon" type="image/png" sizes="128x128" href="/assets/khmsm_logo_128.png">
     <link rel="shortcut icon" type="image/png" href="/assets/khmsm_logo_128.png">

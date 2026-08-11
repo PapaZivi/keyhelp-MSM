@@ -1,5 +1,5 @@
 <div class="modal fade" id="invoicePaymentModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
             <form method="post" class="invoice-payment-form">
                 <div class="modal-header">

@@ -166,6 +166,42 @@ foreach ($packages as $package) {
         $dashboardPackageMarkers[$matches[1]] = true;
     }
 }
+$dashboardMainDomains = [];
+foreach ($domains as $domain) {
+    if ((int)($domain['is_deleted'] ?? 0) === 1) {
+        continue;
+    }
+    $domainName = strtolower(trim((string)($domain['domain'] ?? '')));
+    if ($domainName !== '') {
+        $dashboardMainDomains[$domainName] = true;
+    }
+}
+$dashboardRemoteUserCount = 0;
+foreach ($userGroups as $userGroup) {
+    $dashboardRemoteUserCount += count($userGroup['users'] ?? []);
+}
+$dashboardOpenInvoiceTotal = 0.0;
+$dashboardPendingInvoiceTotal = 0.0;
+$dashboardApprovalInvoiceCount = 0;
+foreach (($billingData['invoices'] ?? []) as $invoice) {
+    $status = (string)($invoice['status'] ?? '');
+    if ($status === 'cancelled') {
+        continue;
+    }
+    $openTotal = (float)($invoice['open_total'] ?? $invoice['total'] ?? 0);
+    if ($openTotal <= 0) {
+        continue;
+    }
+    if (in_array($status, ['draft', 'pending_approval', 'failed'], true)) {
+        $dashboardPendingInvoiceTotal += $openTotal;
+        if ($status === 'pending_approval') {
+            $dashboardApprovalInvoiceCount++;
+        }
+        continue;
+    }
+    $dashboardOpenInvoiceTotal += $openTotal;
+}
+$dashboardCurrency = (string)($formatSettings['currency'] ?? 'EUR');
 ?>
 <!doctype html>
 <html lang="<?= h(current_locale()) ?>" data-theme-mode="<?= h($themeMode ?? 'auto') ?>" data-bs-theme="<?= h($initialTheme) ?>">
@@ -281,16 +317,36 @@ foreach ($packages as $package) {
                     <div class="col-12 col-sm-6 col-xl-3">
                         <div class="card metric-card">
                             <div class="card-body">
-                                <strong><?= count($domains) ?></strong>
-                                <span><?= h(t('dashboard.metric_domains')) ?></span>
+                                <strong><?= count($dashboardMainDomains) ?></strong>
+                                <span><?= h(t('dashboard.metric_main_domains')) ?></span>
                             </div>
                         </div>
                     </div>
                     <div class="col-12 col-sm-6 col-xl-3">
                         <div class="card metric-card">
                             <div class="card-body">
-                                <strong><?= count($dashboardPackageMarkers) ?></strong>
-                                <span><?= h(t('dashboard.metric_packages')) ?></span>
+                                <strong><?= $dashboardRemoteUserCount ?></strong>
+                                <span><?= h(t('dashboard.metric_user_accounts')) ?></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-sm-6 col-xl-3">
+                        <div class="card metric-card">
+                            <div class="card-body">
+                                <strong>
+                                    <?= h(locale_number($dashboardOpenInvoiceTotal, 2) . ' ' . $dashboardCurrency) ?>
+                                </strong>
+                                <span>
+                                    <?= h(t('dashboard.metric_open_invoices')) ?>
+                                    <?php if ($dashboardPendingInvoiceTotal > 0): ?>
+                                        (<?= h(locale_number($dashboardPendingInvoiceTotal, 2) . ' ' . $dashboardCurrency) ?>)
+                                    <?php endif; ?>
+                                </span>
+                                <span class="metric-detail">
+                                    <?= h(t('dashboard.metric_invoices_to_approve', [
+                                        'count' => (string)$dashboardApprovalInvoiceCount,
+                                    ])) ?>
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -667,7 +723,7 @@ foreach ($packages as $package) {
                     data-bs-backdrop="static"
                     data-bs-keyboard="false"
                 >
-                    <div class="modal-dialog">
+                    <div class="modal-dialog modal-dialog-scrollable">
                         <div class="modal-content">
                             <form method="post" class="stack">
                                 <div class="modal-header">

@@ -42,7 +42,7 @@ function user_error_message(string $action): string
         'import_domains' => t('message.import_domains_failed'),
         'import_users' => t('message.import_users_failed'),
         'create_user' => t('message.create_user_failed'),
-        'update_user' => t('message.create_user_failed'),
+        'update_user' => t('message.update_user_failed'),
         'delete_user' => t('message.create_user_failed'),
         'user_login_url' => t('message.user_login_failed'),
         'import_hosting_plans' => t('message.import_hosting_plans_failed'),
