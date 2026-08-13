@@ -32,7 +32,7 @@ try {
     i18n_set_locale($configuredLocale, false);
 
     $billing = new BillingService($config, $repo);
-    $runMessage = $billing->run('cron');
+    $runMessage = $billing->run('cron', true);
     $sendMessage = $billing->sendQueued('cron');
 
     echo $runMessage . PHP_EOL;

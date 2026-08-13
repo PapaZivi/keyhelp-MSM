@@ -6,6 +6,7 @@ $domainOverrides = $billing['domainOverrides'] ?? [];
 $userSettings = $billing['userSettings'] ?? [];
 $userItems = $billing['userItems'] ?? [];
 $pendingItems = $billing['pendingItems'] ?? [];
+$danglingPendingItems = $billing['danglingPendingItems'] ?? [];
 $invoices = $billing['invoices'] ?? [];
 $settings = $billing['settings'] ?? [];
 $domains = $domains ?? [];
@@ -27,6 +28,15 @@ $formatPercent = static function (mixed $value): string {
         return '';
     }
     return rtrim(rtrim(number_format($number, 3, ',', '.'), '0'), ',') . ' %';
+};
+$danglingReasonLabel = static function (string $reason): string {
+    return match ($reason) {
+        'missing_user_item' => t('billing.dangling_missing_user_item'),
+        'inactive_user_item' => t('billing.dangling_inactive_user_item'),
+        'missing_domain' => t('billing.dangling_missing_domain'),
+        'active_invoice' => t('billing.dangling_active_invoice'),
+        default => t('common.unknown'),
+    };
 };
 $taxOptions = static function (array $taxRates, mixed $selected = null): void {
     echo '<option value="">' . h(t('billing.no_tax')) . '</option>';
@@ -215,9 +225,88 @@ $taxOptions = static function (array $taxRates, mixed $selected = null): void {
         </div>
     </section>
 
+    <?php if ($danglingPendingItems !== []): ?>
     <section class="card billing-card">
         <div class="card-body">
-            <h2 class="h5"><?= h(t('billing.pending_items')) ?></h2>
+            <h2 class="h5"><?= h(t('billing.dangling_pending_items')) ?></h2>
+            <p class="billing-muted"><?= h(t('billing.dangling_pending_items_help')) ?></p>
+            <div class="table-responsive">
+                <table class="table table-sm billing-table">
+                    <thead>
+                        <tr>
+                            <th><?= h(t('js.user')) ?></th>
+                            <th><?= h(t('billing.description')) ?></th>
+                            <th><?= h(t('billing.total')) ?></th>
+                            <th><?= h(t('billing.reference')) ?></th>
+                            <th><?= h(t('billing.reason')) ?></th>
+                            <th><?= h(t('common.actions')) ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($danglingPendingItems as $item): ?>
+                        <?php [$description, $description2] = $splitDescription((string)($item['description'] ?? '')); ?>
+                        <?php $relatedInvoiceId = (int)($item['related_invoice_id'] ?? 0); ?>
+                        <tr>
+                            <td><?= h($item['username'] ?? '') ?></td>
+                            <td>
+                                <?= h($description) ?>
+                                <?php if ($description2 !== ''): ?>
+                                <div class="billing-muted"><?= h($description2) ?></div>
+                                <?php endif; ?>
+                            </td>
+                            <td><?= h($item['gross_total']) ?></td>
+                            <td><?= h($item['billing_reference']) ?></td>
+                            <td>
+                                <?= h($danglingReasonLabel((string)($item['dangling_reason'] ?? ''))) ?>
+                                <?php if ($relatedInvoiceId > 0): ?>
+                                <div class="billing-muted">
+                                    <?= h(t('billing.related_invoice')) ?>:
+                                    <a href="/?invoice_pdf=<?= $relatedInvoiceId ?>" target="_blank">
+                                        <?= h($item['related_invoice_number'] ?? '') ?>
+                                    </a>
+                                </div>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <?php if ((int)($item['can_delete'] ?? 0) === 1): ?>
+                                <form method="post">
+                                    <input type="hidden" name="_action" value="delete_pending_billing_item">
+                                    <input type="hidden" name="_return" value="<?= h($returnPath) ?>">
+                                    <input type="hidden" name="id" value="<?= (int)$item['id'] ?>">
+                                    <button class="btn btn-link danger-link p-0" type="submit">
+                                        <?= h(t('common.delete')) ?>
+                                    </button>
+                                </form>
+                                <?php else: ?>
+                                <span class="billing-muted"><?= h(t('billing.delete_invoice_first')) ?></span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+    <?php endif; ?>
+
+    <section class="card billing-card">
+        <div class="card-body">
+            <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
+                <div>
+                    <h2 class="h5 mb-1"><?= h(t('billing.pending_items')) ?></h2>
+                    <p class="billing-muted mb-0"><?= h(t('billing.pending_items_help')) ?></p>
+                </div>
+                <?php if ($pendingItems !== []): ?>
+                <form method="post">
+                    <input type="hidden" name="_action" value="billing_run">
+                    <input type="hidden" name="_return" value="<?= h($returnPath) ?>">
+                    <button class="btn btn-sm btn-primary">
+                        <?= h(t('billing.create_invoices_from_pending')) ?>
+                    </button>
+                </form>
+                <?php endif; ?>
+            </div>
             <div class="table-responsive">
                 <table class="table table-sm billing-table">
                     <thead>
@@ -227,11 +316,13 @@ $taxOptions = static function (array $taxRates, mixed $selected = null): void {
                             <th><?= h(t('billing.discount')) ?></th>
                             <th><?= h(t('billing.total')) ?></th>
                             <th><?= h(t('billing.reference')) ?></th>
+                            <th><?= h(t('common.actions')) ?></th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php foreach ($pendingItems as $item): ?>
                         <?php [$description, $description2] = $splitDescription((string)($item['description'] ?? '')); ?>
+                        <?php $relatedInvoiceId = (int)($item['related_invoice_id'] ?? 0); ?>
                         <tr>
                             <td><?= h(trim((string)($item['server_name'] ?? '')) !== '' ? $item['server_name'] . ' / ' . $item['username'] : $item['username']) ?></td>
                             <td>
@@ -242,7 +333,31 @@ $taxOptions = static function (array $taxRates, mixed $selected = null): void {
                             </td>
                             <td><?= h($formatPercent($item['discount_percent'] ?? 0)) ?></td>
                             <td><?= h($item['gross_total']) ?></td>
-                            <td><?= h($item['billing_reference']) ?></td>
+                            <td>
+                                <?= h($item['billing_reference']) ?>
+                                <?php if ($relatedInvoiceId > 0): ?>
+                                <div class="billing-muted">
+                                    <?= h(t('billing.related_invoice')) ?>:
+                                    <a href="/?invoice_pdf=<?= $relatedInvoiceId ?>" target="_blank">
+                                        <?= h($item['related_invoice_number'] ?? '') ?>
+                                    </a>
+                                </div>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <?php if ($relatedInvoiceId > 0): ?>
+                                <span class="billing-muted"><?= h(t('billing.delete_invoice_first')) ?></span>
+                                <?php else: ?>
+                                <form method="post" onsubmit="return confirm('<?= h(t('billing.confirm_delete_pending_item')) ?>');">
+                                    <input type="hidden" name="_action" value="delete_pending_billing_item">
+                                    <input type="hidden" name="_return" value="<?= h($returnPath) ?>">
+                                    <input type="hidden" name="id" value="<?= (int)$item['id'] ?>">
+                                    <button class="btn btn-sm btn-outline-danger">
+                                        <?= h(t('common.delete')) ?>
+                                    </button>
+                                </form>
+                                <?php endif; ?>
+                            </td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>

@@ -7,17 +7,17 @@ final class InvoicePdfRenderer
     {
         return <<<'HTML'
 <style>
-    body { color: #212529; font-family: dejavusans, sans-serif; font-size: 10pt; }
-    .invoice-header { border-bottom: 1px solid #e1e5eb; padding-bottom: 16px; }
-    .invoice-title { font-size: 24pt; font-weight: bold; text-align: right; }
+    body { color: #212529; font-family: dejavusans, sans-serif; font-size: 9pt; }
+    .invoice-header { border-bottom: 1px solid #e1e5eb; padding-bottom: 12px; }
+    .invoice-title { font-size: 22pt; font-weight: bold; text-align: right; }
     .invoice-number { color: #5b636f; text-align: right; }
-    .columns { width: 100%; margin-top: 30px; }
+    .columns { width: 100%; margin-top: 22px; }
     .columns td { vertical-align: top; }
     .muted { color: #5b636f; font-size: 8pt; }
     .meta td { padding: 2px 0; }
-    .items { width: 100%; border-collapse: collapse; margin-top: 28px; }
-    .items th { background: #f6f8fb; color: #5b636f; border-bottom: 1px solid #e1e5eb; font-size: 8pt; padding: 7px 6px; text-align: left; }
-    .items td { border-bottom: 1px solid #e1e5eb; padding: 7px 6px; vertical-align: top; }
+    .items { width: 100%; border-collapse: collapse; margin-top: 18px; }
+    .items th { background: #f6f8fb; color: #5b636f; border-bottom: 1px solid #e1e5eb; font-size: 7.5pt; padding: 4px 5px; text-align: left; }
+    .items td { border-bottom: 1px solid #e1e5eb; padding: 4px 5px; vertical-align: top; }
     .item-description2 { color: #5b636f; font-size: 8pt; margin-top: 2px; }
     .right { text-align: right; }
     .totals { width: 42%; margin-left: auto; margin-top: 18px; }
@@ -46,9 +46,7 @@ final class InvoicePdfRenderer
         <td width="42%">
             <table class="meta" width="100%">
                 <tr><td class="muted">Rechnungsdatum</td><td class="right"><strong>{{invoice.date}}</strong></td></tr>
-                <tr><td class="muted">Leistungszeitraum</td><td class="right"><strong>{{invoice.period}}</strong></td></tr>
                 <tr><td class="muted">Kundennummer</td><td class="right"><strong>{{customer.number}}</strong></td></tr>
-                <tr><td class="muted">Status</td><td class="right"><strong>{{invoice.status}}</strong></td></tr>
             </table>
         </td>
     </tr>
@@ -141,10 +139,7 @@ HTML;
             public function Footer(): void
             {
                 $text = trim($this->paymentAccountDetails);
-                if ($text === '') {
-                    return;
-                }
-                $this->SetY(-24);
+                $this->SetY($text === '' ? -14 : -24);
                 $left = $this->getMargins()['left'] ?? 18;
                 $right = $this->getMargins()['right'] ?? 18;
                 $width = $this->getPageWidth() - $left - $right;
@@ -153,12 +148,12 @@ HTML;
                 $this->Ln(3);
                 $this->SetTextColor(91, 99, 111);
                 $this->SetFont('dejavusans', '', 7);
-                $this->MultiCell($width, 3.8, $text, 0, 'C', false, 1, $left);
-                if ($this->getNumPages() > 1) {
-                    $this->SetY(-9);
-                    $this->SetFont('dejavusans', '', 7);
-                    $this->Cell($width, 4, 'Seite ' . $this->getAliasNumPage() . ' / ' . $this->getAliasNbPages(), 0, 0, 'C');
+                if ($text !== '') {
+                    $this->MultiCell($width, 3.8, $text, 0, 'C', false, 1, $left);
                 }
+                $this->SetY(-9);
+                $this->SetFont('dejavusans', '', 7);
+                $this->Cell($width, 4, 'Seite ' . $this->getAliasNumPage() . ' / ' . $this->getAliasNbPages(), 0, 0, 'C');
                 $this->SetTextColor(33, 37, 41);
             }
         };
@@ -170,7 +165,7 @@ HTML;
         $pdf->SetMargins(18, 18, 18);
         $pdf->SetAutoPageBreak(true, $pdf->paymentAccountDetails === '' ? 22 : 34);
         $pdf->setPrintHeader(false);
-        $pdf->setPrintFooter($pdf->paymentAccountDetails !== '');
+        $pdf->setPrintFooter(true);
         $pdf->AddPage();
         $pdf->writeHTML($this->renderTemplate($template ?: self::defaultTemplate(), $invoice, $items, $sender, true), true, false, true, false, '');
 
@@ -184,6 +179,7 @@ HTML;
 
     private function renderTemplate(string $template, array $invoice, array $items, string $sender, bool $pdfMode): string
     {
+        $template = $this->prepareInvoiceTemplate($template);
         $variables = $this->templateVariables($invoice, $sender, $pdfMode);
         $html = preg_replace_callback('/\{\{#items\}\}(.*?)\{\{\/items\}\}/s', function (array $match) use ($items): string {
             $block = $match[1];
@@ -194,6 +190,88 @@ HTML;
             return $rows;
         }, $template) ?? $template;
         return $this->replaceVariables($html, $variables);
+    }
+
+    private function prepareInvoiceTemplate(string $template): string
+    {
+        $template = preg_replace(
+            '/<tr\b(?:(?!<\/tr>).)*\{\{invoice\.status\}\}(?:(?!<\/tr>).)*<\/tr>\s*/is',
+            '',
+            $template
+        ) ?? $template;
+        $template = preg_replace(
+            '/<tr\b(?:(?!<\/tr>).)*\{\{invoice\.period\}\}(?:(?!<\/tr>).)*<\/tr>\s*/is',
+            '',
+            $template
+        ) ?? $template;
+        if (!$this->hasInvoiceHeader($template)) {
+            $template = $this->invoiceHeaderTemplate() . "\n" . $template;
+        }
+        $compactCss = <<<'HTML'
+<style>
+    body { color: #212529; font-family: dejavusans, sans-serif; font-size: 9pt; }
+    .invoice-header { border-bottom: 1px solid #e1e5eb; padding-bottom: 12px; }
+    .invoice-title { font-size: 22pt; font-weight: bold; text-align: right; }
+    .invoice-number { color: #5b636f; text-align: right; }
+    .columns { margin-top: 22px; }
+    .columns td { vertical-align: top; }
+    .muted { color: #5b636f; font-size: 8pt; }
+    .meta td { padding: 2px 0; }
+    .items { margin-top: 18px; }
+    .items th { font-size: 7.5pt; padding: 4px 5px; }
+    .items td { padding: 4px 5px; }
+    .item-description2 { color: #5b636f; font-size: 8pt; }
+    .right { text-align: right; }
+</style>
+
+HTML;
+        return $compactCss . $template;
+    }
+
+    private function hasInvoiceHeader(string $template): bool
+    {
+        return str_contains($template, 'invoice-header')
+            || str_contains($template, '{{logo_src}}')
+            || str_contains($template, '{{recipient.address_html}}')
+            || str_contains($template, '{{invoice.number}}');
+    }
+
+    private function invoiceHeaderTemplate(): string
+    {
+        return <<<'HTML'
+<div class="invoice-header">
+    <table width="100%">
+        <tr>
+            <td width="45%"><img src="{{logo_src}}" width="170"></td>
+            <td width="55%">
+                <div class="invoice-title">Rechnung</div>
+                <div class="invoice-number">{{invoice.number}}</div>
+            </td>
+        </tr>
+    </table>
+</div>
+
+<table class="columns">
+    <tr>
+        <td width="58%">
+            <div class="muted">{{sender.name}}</div>
+            <p>{{recipient.address_html}}</p>
+        </td>
+        <td width="42%">
+            <table class="meta" width="100%">
+                <tr>
+                    <td class="muted">Rechnungsdatum</td>
+                    <td class="right"><strong>{{invoice.date}}</strong></td>
+                </tr>
+                <tr>
+                    <td class="muted">Kundennummer</td>
+                    <td class="right"><strong>{{customer.number}}</strong></td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+</table>
+HTML;
     }
 
     private function replaceVariables(string $template, array $variables): string
@@ -215,12 +293,13 @@ HTML;
         return [
             'logo_src' => $pdfMode ? dirname(__DIR__) . '/public/assets/khmsm_fulllogo_512.png' : '/assets/khmsm_fulllogo_512.png',
             'sender.name' => $this->e($this->senderName($sender)),
+            'sender.email' => $this->e($this->senderEmail($sender)),
             'sender.full' => nl2br($this->e(trim($sender))),
             'recipient.address_html' => implode('<br>', array_map(fn(string $line): string => $this->e($line), $recipient)),
             'invoice.number' => $this->e((string)($invoice['invoice_number'] ?? '')),
             'invoice.date' => $this->e($this->formatDate($createdAt)),
             'invoice.period' => $this->e(trim($this->formatDate($periodStart) . ' - ' . $this->formatDate($periodEnd), ' -')),
-            'invoice.status' => $this->e((string)($invoice['status'] ?? '')),
+            'invoice.status' => $this->e($this->invoiceStatusLabel((string)($invoice['status'] ?? ''))),
             'invoice.subtotal' => $this->e($this->money($invoice['subtotal'] ?? 0)),
             'invoice.user_discount_percent' => $this->e($this->percent($userDiscountPercent)),
             'invoice.user_discount_total' => $this->e($this->money(-$userDiscountAmount)),
@@ -260,6 +339,28 @@ HTML;
             trim((string)($parts[0] ?? '')),
             trim((string)($parts[1] ?? '')),
         ];
+    }
+
+    private function invoiceStatusLabel(string $status): string
+    {
+        if ($status === '') {
+            return '';
+        }
+        $key = 'billing.status_' . $status;
+        $label = function_exists('t') ? t($key) : $key;
+        if ($label !== $key) {
+            return $label;
+        }
+        return match ($status) {
+            'draft' => 'Entwurf',
+            'pending_approval' => 'wartet auf Freigabe',
+            'approved' => 'freigegeben',
+            'queued' => 'wartet auf Versand',
+            'sent' => 'versendet',
+            'failed' => 'fehlgeschlagen',
+            'cancelled' => 'storniert',
+            default => $status,
+        };
     }
 
     private function percent(mixed $value): string
@@ -495,6 +596,15 @@ HTML;
             return trim($match[1], " \t\n\r\0\x0B\"");
         }
         return trim($sender) ?: (string)($this->config['app']['name'] ?? 'KeyHelp MSM');
+    }
+
+    private function senderEmail(string $sender): string
+    {
+        if (preg_match('/<([^<>@\s]+@[^<>\s]+)>/', trim($sender), $match)) {
+            return trim($match[1]);
+        }
+        $sender = trim($sender);
+        return filter_var($sender, FILTER_VALIDATE_EMAIL) ? $sender : '';
     }
 
     private function formatDate(string $date): string

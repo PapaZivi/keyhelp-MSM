@@ -150,10 +150,50 @@ $taxOptions = static function (array $taxRates, mixed $selected = null): void {
                             <input
                                 class="form-control"
                                 name="invoice_number_format"
-                                value="<?= h($settings['invoice_number_format'] ?? '{{JAHR}}{{MONAT}}{{TAG}}-{{LFNR}}') ?>"
+                                value="<?= h($settings['invoice_number_format'] ?? '{{YEAR}}{{MONTH}}{{DAY}}-{{SEQ}}') ?>"
                             >
                         </label>
                         <p class="form-text"><?= h(t('billing.invoice_number_help')) ?></p>
+                    </div>
+
+                    <p class="form-text mt-3"><?= h(t('billing.mail_template_variables_help')) ?></p>
+                    <div class="template-editor-grid">
+                        <div class="stack">
+                            <label class="form-label">
+                                <?= h(t('billing.invoice_mail_subject')) ?>
+                                <input
+                                    class="form-control"
+                                    name="invoice_mail_subject"
+                                    value="<?= h($settings['invoice_mail_subject'] ?? 'Rechnung {{invoice.number}}') ?>"
+                                >
+                            </label>
+                            <label class="form-label">
+                                <?= h(t('billing.invoice_mail_body')) ?>
+                                <textarea
+                                    class="form-control"
+                                    name="invoice_mail_body"
+                                    rows="9"
+                                ><?= h($settings['invoice_mail_body'] ?? "Guten Tag {{customer.name}},\n\nIhre Rechnung {{invoice.number}} über {{invoice.total}} befindet sich im Anhang.\n\nMit freundlichen Grüßen\n{{sender.name}}") ?></textarea>
+                            </label>
+                        </div>
+                        <div class="stack">
+                            <label class="form-label">
+                                <?= h(t('billing.dunning_mail_subject')) ?>
+                                <input
+                                    class="form-control"
+                                    name="dunning_mail_subject"
+                                    value="<?= h($settings['dunning_mail_subject'] ?? 'Mahnung zu Rechnung {{invoice.number}}') ?>"
+                                >
+                            </label>
+                            <label class="form-label">
+                                <?= h(t('billing.dunning_mail_body')) ?>
+                                <textarea
+                                    class="form-control"
+                                    name="dunning_mail_body"
+                                    rows="9"
+                                ><?= h($settings['dunning_mail_body'] ?? "Guten Tag {{customer.name}},\n\nzu Ihrer Rechnung {{invoice.number}} über {{invoice.total}} konnten wir noch keinen vollständigen Zahlungseingang feststellen.\n\nBitte prüfen Sie den offenen Betrag.\n\nMit freundlichen Grüßen\n{{sender.name}}") ?></textarea>
+                            </label>
+                        </div>
                     </div>
 
                     <p class="form-text mt-3"><?= h(t('billing.template_variables_help')) ?></p>

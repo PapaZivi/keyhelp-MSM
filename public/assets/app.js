@@ -203,9 +203,60 @@ function billingFrequencyLabel(value) {
 }
 
 function billingItemStatusLabel(item) {
+    if (Number(item.has_invoice || 0) === 1) {
+        return tr('billing.status_billed', 'billed');
+    }
     return String(item.active || '') === '1'
         ? tr('server.active', 'active')
         : tr('common.inactive', 'inactive');
+}
+
+function updateBillingItemsView(container) {
+    const search = String(container.querySelector('[data-billing-items-search]')?.value || '').trim().toLowerCase();
+    const showBilled = Boolean(container.querySelector('[data-billing-items-show-billed]')?.checked);
+    const pageSize = 10;
+    const rows = Array.from(container.querySelectorAll('[data-billing-item-row]'));
+    const visibleRows = rows.filter((row) => {
+        if (!showBilled && row.dataset.billed === '1') {
+            return false;
+        }
+        return search === '' || String(row.dataset.search || '').includes(search);
+    });
+    let page = Number.parseInt(container.dataset.billingItemsPage || '1', 10);
+    const pageCount = Math.max(1, Math.ceil(visibleRows.length / pageSize));
+    if (!Number.isFinite(page) || page < 1) {
+        page = 1;
+    }
+    if (page > pageCount) {
+        page = pageCount;
+    }
+    container.dataset.billingItemsPage = String(page);
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+    rows.forEach((row) => {
+        row.hidden = true;
+    });
+    visibleRows.slice(start, end).forEach((row) => {
+        row.hidden = false;
+    });
+    const empty = container.querySelector('[data-billing-items-empty]');
+    if (empty) {
+        empty.hidden = visibleRows.length !== 0;
+    }
+    const summary = container.querySelector('[data-billing-items-page-info]');
+    if (summary) {
+        summary.textContent = tr('billing.items_page_info', '{shown} of {total}')
+            .replace('{shown}', String(visibleRows.length === 0 ? 0 : start + 1) + '-' + String(Math.min(end, visibleRows.length)))
+            .replace('{total}', String(visibleRows.length));
+    }
+    const prev = container.querySelector('[data-billing-items-prev]');
+    const next = container.querySelector('[data-billing-items-next]');
+    if (prev) {
+        prev.disabled = page <= 1;
+    }
+    if (next) {
+        next.disabled = page >= pageCount;
+    }
 }
 
 function updateDomainCell(row, fieldName, value) {
@@ -693,16 +744,43 @@ function renderUserBillingItems(form, items) {
         return;
     }
     const rows = safeItems.map((item) => {
-        return '<tr>'
+        const hasInvoice = Number(item.has_invoice || 0) === 1;
+        const invoiceNumber = item.related_invoice_number || '';
+        const action = hasInvoice
+            ? '<span class="billing-muted" title="' + escapeHtml(invoiceNumber) + '">'
+                + escapeHtml(tr('billing.delete_invoice_first', 'delete invoice first'))
+                + '</span>'
+            : '<button type="button" class="btn btn-sm btn-outline-danger billing-item-delete" data-billing-item-id="' + escapeHtml(item.id || '') + '">'
+                + escapeHtml(tr('common.delete', 'Delete'))
+                + '</button>';
+        const searchText = [
+            item.description || '',
+            formatMoney(item.amount || '0'),
+            formatDisplayDate(item.booking_date || ''),
+            billingFrequencyLabel(item.frequency || 'once'),
+            billingItemStatusLabel(item),
+            invoiceNumber,
+        ].join(' ').toLowerCase();
+        return '<tr data-billing-item-row data-billed="' + (hasInvoice ? '1' : '0') + '" data-search="' + escapeHtml(searchText) + '">'
             + '<td>' + escapeHtml(item.description || '') + '</td>'
             + '<td>' + escapeHtml(formatMoney(item.amount || '0')) + '</td>'
             + '<td>' + escapeHtml(formatDisplayDate(item.booking_date || '')) + '</td>'
             + '<td>' + escapeHtml(billingFrequencyLabel(item.frequency || 'once')) + '</td>'
             + '<td>' + escapeHtml(billingItemStatusLabel(item)) + '</td>'
-            + '<td><button type="button" class="btn btn-sm btn-outline-danger billing-item-delete" data-billing-item-id="' + escapeHtml(item.id || '') + '">' + escapeHtml(tr('common.delete', 'Delete')) + '</button></td>'
+            + '<td>' + action + '</td>'
             + '</tr>';
     }).join('');
-    target.innerHTML = '<h3 class="h6 mt-4">' + escapeHtml(tr('billing.existing_user_items', 'Existing billing items')) + '</h3>'
+    target.dataset.billingItemsPage = '1';
+    target.innerHTML = '<div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mt-4 mb-2">'
+        + '<h3 class="h6 mb-0">' + escapeHtml(tr('billing.existing_user_items', 'Existing billing items')) + '</h3>'
+        + '<div class="d-flex flex-wrap align-items-center gap-2">'
+        + '<input type="search" class="form-control form-control-sm billing-items-filter" data-billing-items-search placeholder="' + escapeHtml(tr('billing.filter_items', 'Filter items')) + '">'
+        + '<label class="form-check billing-check mb-0">'
+        + '<input class="form-check-input" type="checkbox" data-billing-items-show-billed>'
+        + escapeHtml(tr('billing.show_billed_items', 'Show billed items'))
+        + '</label>'
+        + '</div>'
+        + '</div>'
         + '<div class="table-responsive"><table class="table table-sm align-middle mb-0">'
         + '<thead><tr>'
         + '<th>' + escapeHtml(tr('billing.item_description', 'Description')) + '</th>'
@@ -711,7 +789,14 @@ function renderUserBillingItems(form, items) {
         + '<th>' + escapeHtml(tr('billing.interval', 'Interval')) + '</th>'
         + '<th>' + escapeHtml(tr('common.status', 'Status')) + '</th>'
         + '<th>' + escapeHtml(tr('common.actions', 'Actions')) + '</th>'
-        + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+        + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+        + '<p class="billing-muted mt-2" data-billing-items-empty hidden>' + escapeHtml(tr('billing.no_matching_items', 'No matching items.')) + '</p>'
+        + '<div class="d-flex align-items-center justify-content-end gap-2 mt-2">'
+        + '<span class="billing-muted" data-billing-items-page-info></span>'
+        + '<button type="button" class="btn btn-sm btn-outline-secondary" data-billing-items-prev>' + escapeHtml(tr('common.previous', 'Previous')) + '</button>'
+        + '<button type="button" class="btn btn-sm btn-outline-secondary" data-billing-items-next>' + escapeHtml(tr('common.next', 'Next')) + '</button>'
+        + '</div>';
+    updateBillingItemsView(target);
 }
 
 function prepareUserForm(form, mode, serverId, serverName) {
@@ -951,9 +1036,21 @@ function renderCustomerAccount(form, balance, entries, pendingTotal = '0.00') {
         const marker = isPending
             ? '<span class="badge text-bg-warning ms-2">' + escapeHtml(tr('billing.account_pending_marker', 'reserved')) + '</span>'
             : '';
-        const action = isPending && entry.invoice_id
-            ? '<button type="button" class="btn btn-sm btn-outline-success customer-account-invoice-approve" data-invoice-id="' + escapeHtml(entry.invoice_id) + '">' + escapeHtml(tr('billing.approve_only', 'Approve')) + '</button>'
-            : '';
+        let action = '';
+        if (isInvoice && entry.invoice_id && ['draft', 'pending_approval', 'failed'].includes(status)) {
+            action = '<button type="button" class="btn btn-sm btn-outline-success customer-account-invoice-approve" data-invoice-id="' + escapeHtml(entry.invoice_id) + '">'
+                + escapeHtml(tr('billing.approve_only', 'Approve'))
+                + '</button>';
+        } else if (isInvoice && entry.invoice_id && status === 'approved') {
+            action = '<div class="d-flex justify-content-end gap-2">'
+                + '<button type="button" class="btn btn-sm btn-outline-primary customer-account-invoice-send" data-invoice-id="' + escapeHtml(entry.invoice_id) + '">'
+                + escapeHtml(tr('billing.send', 'Send'))
+                + '</button>'
+                + '<button type="button" class="btn btn-sm btn-outline-secondary customer-account-invoice-queue" data-invoice-id="' + escapeHtml(entry.invoice_id) + '">'
+                + escapeHtml(tr('billing.queue', 'Queue'))
+                + '</button>'
+                + '</div>';
+        }
         return '<tr>'
             + '<td>' + escapeHtml(formatDisplayDate(String(entry.entry_date || '').slice(0, 10))) + '</td>'
             + '<td>' + typeCell + marker + '</td>'
@@ -2626,7 +2723,7 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('click', async (event) => {
-    const button = event.target.closest('.customer-account-invoice-approve');
+    const button = event.target.closest('.customer-account-invoice-approve, .customer-account-invoice-send, .customer-account-invoice-queue');
     if (!button) {
         return;
     }
@@ -2635,7 +2732,12 @@ document.addEventListener('click', async (event) => {
         return;
     }
     const body = new FormData();
-    body.set('_action', 'billing_invoice_approve');
+    const action = button.classList.contains('customer-account-invoice-send')
+        ? 'billing_invoice_send'
+        : button.classList.contains('customer-account-invoice-queue')
+            ? 'billing_invoice_queue'
+            : 'billing_invoice_approve';
+    body.set('_action', action);
     body.set('invoice_id', button.dataset.invoiceId || '');
     body.set('user_id', form.querySelector('[data-local-user-id]')?.value || '');
     button.disabled = true;
@@ -2699,6 +2801,47 @@ document.addEventListener('click', async (event) => {
     } finally {
         button.disabled = false;
     }
+});
+
+document.addEventListener('input', (event) => {
+    const control = event.target.closest('[data-billing-items-search]');
+    if (!control) {
+        return;
+    }
+    const container = control.closest('[data-billing-existing-items]');
+    if (!container) {
+        return;
+    }
+    container.dataset.billingItemsPage = '1';
+    updateBillingItemsView(container);
+});
+
+document.addEventListener('change', (event) => {
+    const control = event.target.closest('[data-billing-items-show-billed]');
+    if (!control) {
+        return;
+    }
+    const container = control.closest('[data-billing-existing-items]');
+    if (!container) {
+        return;
+    }
+    container.dataset.billingItemsPage = '1';
+    updateBillingItemsView(container);
+});
+
+document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-billing-items-prev], [data-billing-items-next]');
+    if (!button) {
+        return;
+    }
+    const container = button.closest('[data-billing-existing-items]');
+    if (!container) {
+        return;
+    }
+    const current = Number.parseInt(container.dataset.billingItemsPage || '1', 10);
+    const direction = button.matches('[data-billing-items-prev]') ? -1 : 1;
+    container.dataset.billingItemsPage = String(Math.max(1, (Number.isFinite(current) ? current : 1) + direction));
+    updateBillingItemsView(container);
 });
 
 document.addEventListener('click', async (event) => {

@@ -12,4 +12,4 @@ require dirname(__DIR__) . '/src/BillingService.php';
 i18n_init($config);
 $repo = new Repository(Database::connect($config));
 $service = new BillingService($config, $repo);
-echo $service->run('cron') . PHP_EOL;
+echo $service->run('cron', true) . PHP_EOL;

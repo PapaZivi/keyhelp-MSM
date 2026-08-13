@@ -400,13 +400,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['_ajax'] ?? '') === '1') {
             ], JSON_UNESCAPED_UNICODE);
             exit;
         }
-        if ($action === 'billing_invoice_approve') {
+        if (in_array($action, ['billing_invoice_approve', 'billing_invoice_send', 'billing_invoice_queue'], true)) {
             $invoiceId = (int)($_POST['invoice_id'] ?? 0);
             $localUserId = (int)($_POST['user_id'] ?? 0);
-            $message = $billingService->approveInvoice(
-                $invoiceId,
-                (string)($config['app']['admin_user'] ?? 'admin')
-            );
+            $actor = (string)($config['app']['admin_user'] ?? 'admin');
+            $message = match ($action) {
+                'billing_invoice_send' => $billingService->sendInvoice($invoiceId, $actor),
+                'billing_invoice_queue' => $billingService->queueInvoice($invoiceId, $actor),
+                default => $billingService->approveInvoice($invoiceId, $actor),
+            };
             if ($localUserId <= 0) {
                 $invoice = $repo->invoice($invoiceId);
                 $localUserId = (int)($invoice['user_id'] ?? 0);
@@ -730,6 +732,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'billing_save_tld_price' => (function () use ($repo): string {
                 $repo->saveBillingTldPrice($_POST);
                 return t('billing.tld_saved');
+            })(),
+            'delete_pending_billing_item' => (function () use ($repo): string {
+                $repo->deletePendingBillingItem((int)($_POST['id'] ?? 0));
+                return t('billing.pending_item_deleted');
             })(),
             'billing_save_user_settings' => (function () use ($repo): string {
                 $repo->saveBillingUserSettings($_POST);

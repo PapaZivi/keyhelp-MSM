@@ -91,17 +91,42 @@ final class Repository
 
     public function usernamePattern(): string
     {
-        return $this->setting('username_pattern', '{{servername_short}}_user_{{NUMMER:2}}');
+        return $this->setting('username_pattern', '{{servername_short}}_user_{{NUMBER:2}}');
     }
 
     public function updateUsernamePattern(string $pattern): string
     {
         $pattern = trim($pattern);
         if ($pattern === '') {
-            $pattern = '{{servername_short}}_user_{{NUMMER:2}}';
+            $pattern = '{{servername_short}}_user_{{NUMBER:2}}';
         }
+        $this->validateUsernamePattern($pattern);
         $this->saveSetting('username_pattern', $pattern);
         return $pattern;
+    }
+
+    private function validateUsernamePattern(string $pattern): void
+    {
+        $allowed = ['servername', 'servername_short', 'NUMBER'];
+        preg_match_all('/\{\{([A-Za-z_]+)(?::(\d+))?\}\}/', $pattern, $matches, PREG_SET_ORDER);
+        foreach ($matches as $match) {
+            $variable = $match[1];
+            if (!in_array($variable, $allowed, true)) {
+                throw new RuntimeException(t('config.invalid_username_pattern'));
+            }
+            if (isset($match[2]) && $variable !== 'NUMBER') {
+                throw new RuntimeException(t('config.invalid_username_pattern'));
+            }
+        }
+
+        $withoutVariables = preg_replace('/\{\{[A-Za-z_]+(?::\d+)?\}\}/', '', $pattern) ?? '';
+        if (
+            preg_match('/\b(?:servername|servername_short|NUMBER)\b/', $withoutVariables)
+            || str_contains($withoutVariables, '{{')
+            || str_contains($withoutVariables, '}}')
+        ) {
+            throw new RuntimeException(t('config.invalid_username_pattern'));
+        }
     }
 
     public static function refreshIntervalOptions(): array
@@ -941,13 +966,14 @@ final class Repository
 
     private function renderUsernamePattern(string $pattern, array $server, int $number): string
     {
+        $this->validateUsernamePattern($pattern);
         $serverName = $this->asciiToken((string)($server['name'] ?? 'server'));
         $username = str_replace(
             ['{{servername}}', '{{servername_short}}'],
             [$serverName, substr($serverName, 0, 6)],
             $pattern
         );
-        $username = preg_replace_callback('/\{\{NUMMER(?::(\d+))?\}\}/', static function (array $match) use ($number): string {
+        $username = preg_replace_callback('/\{\{NUMBER(?::(\d+))?\}\}/', static function (array $match) use ($number): string {
             $width = isset($match[1]) ? max(1, (int)$match[1]) : 1;
             return str_pad((string)$number, $width, '0', STR_PAD_LEFT);
         }, $username) ?? $username;
@@ -1049,23 +1075,27 @@ final class Repository
 
     public function saveBillingSettings(array $data): void
     {
-        $format = trim((string)($data['invoice_number_format'] ?? '{{JAHR}}{{MONAT}}{{TAG}}-{{LFNR}}'));
+        $format = trim((string)($data['invoice_number_format'] ?? '{{YEAR}}{{MONTH}}{{DAY}}-{{SEQ}}'));
         if ($format === '') {
-            $format = '{{JAHR}}{{MONAT}}{{TAG}}-{{LFNR}}';
+            $format = '{{YEAR}}{{MONTH}}{{DAY}}-{{SEQ}}';
         }
-        $allowed = ['JAHR', 'MONAT', 'TAG', 'LFNR', 'USERID', 'USERNAME'];
+        $allowed = ['YEAR', 'MONTH', 'DAY', 'SEQ', 'USERID', 'USERNAME'];
         preg_match_all('/\{\{([A-Z_]+)(?::(\d+))?\}\}/', $format, $matches, PREG_SET_ORDER);
         foreach ($matches as $match) {
             $variable = $match[1];
             if (!in_array($variable, $allowed, true)) {
                 throw new RuntimeException(t('billing.invalid_invoice_format'));
             }
-            if (isset($match[2]) && !in_array($variable, ['LFNR', 'USERID'], true)) {
+            if (isset($match[2]) && !in_array($variable, ['SEQ', 'USERID'], true)) {
                 throw new RuntimeException(t('billing.invalid_invoice_format'));
             }
         }
         $withoutVariables = preg_replace('/\{\{[A-Z_]+(?::\d+)?\}\}/', '', $format) ?? '';
-        if (preg_match('/\b(?:JAHR|MONAT|TAG|LFNR|USERID|USERNAME)\b/', $withoutVariables)) {
+        if (
+            preg_match('/\b(?:YEAR|MONTH|DAY|SEQ|USERID|USERNAME)\b/', $withoutVariables)
+            || str_contains($withoutVariables, '{{')
+            || str_contains($withoutVariables, '}}')
+        ) {
             throw new RuntimeException(t('billing.invalid_invoice_format'));
         }
         $this->saveBillingSetting('invoice_sender', trim((string)($data['invoice_sender'] ?? '')));
@@ -1074,6 +1104,10 @@ final class Repository
         $this->saveBillingSetting('weekly_invoice_weekday', (string)max(1, min(7, (int)($data['weekly_invoice_weekday'] ?? 1))));
         $this->saveBillingSetting('monthly_invoice_day', (string)max(1, min(28, (int)($data['monthly_invoice_day'] ?? 1))));
         $this->saveBillingSetting('invoice_number_format', $format);
+        $this->saveBillingSetting('invoice_mail_subject', trim((string)($data['invoice_mail_subject'] ?? '')));
+        $this->saveBillingSetting('invoice_mail_body', (string)($data['invoice_mail_body'] ?? ''));
+        $this->saveBillingSetting('dunning_mail_subject', trim((string)($data['dunning_mail_subject'] ?? '')));
+        $this->saveBillingSetting('dunning_mail_body', (string)($data['dunning_mail_body'] ?? ''));
         $this->saveBillingSetting('invoice_template_html', (string)($data['invoice_template_html'] ?? InvoicePdfRenderer::defaultTemplate()));
         $this->saveBillingSetting('dunning_template_html', (string)($data['dunning_template_html'] ?? InvoicePdfRenderer::defaultDunningTemplate()));
         $this->audit('admin', 'billing_settings_saved', 'billing_settings');
@@ -1088,7 +1122,11 @@ final class Repository
                 'payment_account_details' => $this->billingSetting('payment_account_details', ''),
                 'weekly_invoice_weekday' => $this->billingSetting('weekly_invoice_weekday', '1'),
                 'monthly_invoice_day' => $this->billingSetting('monthly_invoice_day', '1'),
-                'invoice_number_format' => $this->billingSetting('invoice_number_format', '{{JAHR}}{{MONAT}}{{TAG}}-{{LFNR}}'),
+                'invoice_number_format' => $this->billingSetting('invoice_number_format', '{{YEAR}}{{MONTH}}{{DAY}}-{{SEQ}}'),
+                'invoice_mail_subject' => $this->billingSetting('invoice_mail_subject', 'Rechnung {{invoice.number}}'),
+                'invoice_mail_body' => $this->billingSetting('invoice_mail_body', "Guten Tag {{customer.name}},\n\nIhre Rechnung {{invoice.number}} über {{invoice.total}} befindet sich im Anhang.\n\nMit freundlichen Grüßen\n{{sender.name}}"),
+                'dunning_mail_subject' => $this->billingSetting('dunning_mail_subject', 'Mahnung zu Rechnung {{invoice.number}}'),
+                'dunning_mail_body' => $this->billingSetting('dunning_mail_body', "Guten Tag {{customer.name}},\n\nzu Ihrer Rechnung {{invoice.number}} über {{invoice.total}} konnten wir noch keinen vollständigen Zahlungseingang feststellen.\n\nBitte prüfen Sie den offenen Betrag.\n\nMit freundlichen Grüßen\n{{sender.name}}"),
                 'invoice_template_html' => $this->billingSetting('invoice_template_html', InvoicePdfRenderer::defaultTemplate()),
                 'dunning_template_html' => $this->billingSetting('dunning_template_html', InvoicePdfRenderer::defaultDunningTemplate()),
                 'last_run_at' => $this->billingLastRunAt(),
@@ -1101,6 +1139,7 @@ final class Repository
             'userItems' => $this->billingUserItems(false),
             'userItemsByUserId' => $this->billingUserItemsByUserId(false),
             'pendingItems' => $this->pendingBillingItems(),
+            'danglingPendingItems' => $this->danglingPendingBillingItems(),
             'invoices' => $this->invoices(),
             'audit' => $this->billingAuditLog(),
         ];
@@ -1324,7 +1363,34 @@ final class Repository
 
     public function billingUserItems(bool $activeOnly): array
     {
-        $sql = 'SELECT i.*, u.display_name AS username, u.email, "" AS server_name, t.name AS tax_name, t.rate_percent FROM billing_user_items i JOIN local_users u ON u.id = i.user_id LEFT JOIN billing_tax_rates t ON t.id = i.tax_rate_id';
+        $sql = "
+            SELECT
+                i.*,
+                u.display_name AS username,
+                u.email,
+                '' AS server_name,
+                t.name AS tax_name,
+                t.rate_percent,
+                invref.invoice_id AS related_invoice_id,
+                invref.invoice_number AS related_invoice_number,
+                CASE WHEN invref.invoice_id IS NULL THEN 0 ELSE 1 END AS has_invoice
+            FROM billing_user_items i
+            JOIN local_users u ON u.id = i.user_id
+            LEFT JOIN billing_tax_rates t ON t.id = i.tax_rate_id
+            LEFT JOIN (
+                SELECT
+                    ii.source_id,
+                    MIN(inv.id) AS invoice_id,
+                    MIN(inv.invoice_number) AS invoice_number
+                FROM invoice_items ii
+                JOIN invoices inv
+                    ON inv.id = ii.invoice_id
+                    AND inv.status <> 'cancelled'
+                WHERE ii.source_type = 'user_item'
+                GROUP BY ii.source_id
+            ) invref
+                ON invref.source_id = i.id
+        ";
         if ($activeOnly) {
             $sql .= ' WHERE i.active = 1';
         }
@@ -1389,11 +1455,49 @@ final class Repository
         $stmt->execute([$id]);
     }
 
+    public function restoreUserItemBillingFromInvoice(int $id, string $serviceDate): void
+    {
+        $stmt = $this->pdo->prepare('
+            UPDATE billing_user_items
+            SET active = 1,
+                last_billed_at = NULL,
+                next_billing_at = ?
+            WHERE id = ?
+        ');
+        $stmt->execute([$serviceDate, $id]);
+    }
+
     public function deleteBillingUserItem(int $id): void
     {
+        $invoiceNumber = $this->billingUserItemInvoiceNumber($id);
+        if ($invoiceNumber !== null) {
+            throw new RuntimeException(t('billing.user_item_has_invoice', ['invoice' => $invoiceNumber]));
+        }
+        $this->deleteUnprotectedPendingBillingItemsBySource('user_item', $id);
         $stmt = $this->pdo->prepare('DELETE FROM billing_user_items WHERE id = ?');
         $stmt->execute([$id]);
         $this->audit('admin', 'billing_user_item_deleted', 'billing_user_item', $id);
+    }
+
+    private function billingUserItemInvoiceNumber(int $id): ?string
+    {
+        if ($id <= 0) {
+            return null;
+        }
+        $stmt = $this->pdo->prepare('
+            SELECT inv.invoice_number
+            FROM invoice_items ii
+            JOIN invoices inv
+                ON inv.id = ii.invoice_id
+                AND inv.status <> ?
+            WHERE ii.source_type = ?
+                AND ii.source_id = ?
+            ORDER BY inv.created_at DESC, inv.id DESC
+            LIMIT 1
+        ');
+        $stmt->execute(['cancelled', 'user_item', $id]);
+        $invoiceNumber = $stmt->fetchColumn();
+        return $invoiceNumber === false ? null : (string)$invoiceNumber;
     }
 
     public function addPendingBillingItem(array $item): int
@@ -1435,23 +1539,37 @@ final class Repository
         return min(1, $stmt->rowCount());
     }
 
-    public function invoiceItemReferenceStatuses(array $references): array
+    public function invoiceItemReferenceStatuses(array $references, ?int $excludeInvoiceId = null): array
     {
         $references = array_values(array_unique(array_filter(array_map('strval', $references))));
         if ($references === []) {
             return [];
         }
         $placeholders = implode(',', array_fill(0, count($references), '?'));
+        $params = $references;
+        $excludeClause = '';
+        if ($excludeInvoiceId !== null) {
+            $excludeClause = ' AND i.id <> ?';
+            $params[] = $excludeInvoiceId;
+        }
         $stmt = $this->pdo->prepare('
             SELECT ii.billing_reference, i.status, i.invoice_number
             FROM invoice_items ii
             JOIN invoices i ON i.id = ii.invoice_id
-            WHERE ii.billing_reference IN (' . $placeholders . ')
+            WHERE ii.billing_reference IN (' . $placeholders . ')' . $excludeClause . '
+            ORDER BY
+                ii.billing_reference,
+                CASE WHEN i.status = \'cancelled\' THEN 1 ELSE 0 END,
+                i.id DESC
         ');
-        $stmt->execute($references);
+        $stmt->execute($params);
         $statuses = [];
         foreach ($stmt->fetchAll() as $row) {
-            $statuses[(string)$row['billing_reference']] = [
+            $reference = (string)$row['billing_reference'];
+            if (isset($statuses[$reference])) {
+                continue;
+            }
+            $statuses[$reference] = [
                 'status' => (string)$row['status'],
                 'invoice_number' => (string)$row['invoice_number'],
             ];
@@ -1459,9 +1577,140 @@ final class Repository
         return $statuses;
     }
 
+    public function invoiceItemSourceStatus(string $sourceType, int $sourceId, ?string $serviceDate, ?int $excludeInvoiceId = null): ?array
+    {
+        if ($sourceType === '' || $sourceId <= 0) {
+            return null;
+        }
+        $params = [$sourceType, $sourceId];
+        $dateClause = ' AND ii.service_date IS NULL';
+        if ($serviceDate !== null && $serviceDate !== '') {
+            $dateClause = ' AND ii.service_date = ?';
+            $params[] = $serviceDate;
+        }
+        $excludeClause = '';
+        if ($excludeInvoiceId !== null) {
+            $excludeClause = ' AND i.id <> ?';
+            $params[] = $excludeInvoiceId;
+        }
+        $stmt = $this->pdo->prepare('
+            SELECT ii.billing_reference, i.status, i.invoice_number
+            FROM invoice_items ii
+            JOIN invoices i ON i.id = ii.invoice_id
+            WHERE ii.source_type = ?
+                AND ii.source_id = ?
+                ' . $dateClause . $excludeClause . '
+            ORDER BY
+                CASE WHEN i.status = \'cancelled\' THEN 1 ELSE 0 END,
+                i.id DESC
+            LIMIT 1
+        ');
+        $stmt->execute($params);
+        $row = $stmt->fetch();
+        if (!$row) {
+            return null;
+        }
+        return [
+            'status' => (string)$row['status'],
+            'invoice_number' => (string)$row['invoice_number'],
+            'billing_reference' => (string)$row['billing_reference'],
+        ];
+    }
+
     public function pendingBillingItems(): array
     {
-        return $this->pdo->query('SELECT p.*, u.display_name AS username, "" AS server_name FROM billing_pending_items p JOIN local_users u ON u.id = p.user_id ORDER BY p.created_at DESC')->fetchAll();
+        return $this->pdo->query("
+            SELECT
+                p.*,
+                u.display_name AS username,
+                '' AS server_name,
+                COALESCE(invref.invoice_id, invsrc.invoice_id) AS related_invoice_id,
+                COALESCE(invref.invoice_number, invsrc.invoice_number) AS related_invoice_number,
+                COALESCE(invref.status, invsrc.status) AS related_invoice_status
+            FROM billing_pending_items p
+            JOIN local_users u ON u.id = p.user_id
+            LEFT JOIN (
+                SELECT
+                    ii.billing_reference,
+                    MIN(inv.id) AS invoice_id,
+                    MIN(inv.invoice_number) AS invoice_number,
+                    MIN(inv.status) AS status
+                FROM invoice_items ii
+                JOIN invoices inv
+                    ON inv.id = ii.invoice_id
+                    AND inv.status <> 'cancelled'
+                GROUP BY ii.billing_reference
+            ) invref
+                ON invref.billing_reference = p.billing_reference
+            LEFT JOIN (
+                SELECT
+                    ii.source_type,
+                    ii.source_id,
+                    ii.service_date,
+                    MIN(inv.id) AS invoice_id,
+                    MIN(inv.invoice_number) AS invoice_number,
+                    MIN(inv.status) AS status
+                FROM invoice_items ii
+                JOIN invoices inv
+                    ON inv.id = ii.invoice_id
+                    AND inv.status <> 'cancelled'
+                GROUP BY ii.source_type, ii.source_id, ii.service_date
+            ) invsrc
+                ON invsrc.source_type = p.source_type
+                AND invsrc.source_id = p.source_id
+                AND invsrc.service_date <=> p.service_date
+            ORDER BY p.created_at DESC
+        ")->fetchAll();
+    }
+
+    public function danglingPendingBillingItems(): array
+    {
+        return $this->pdo->query("
+            SELECT
+                p.*,
+                u.display_name AS username,
+                '' AS server_name,
+                CASE
+                    WHEN p.source_type = 'user_item' AND bui.id IS NULL THEN 'missing_user_item'
+                    WHEN p.source_type = 'user_item' AND bui.active = 0 THEN 'inactive_user_item'
+                    WHEN p.source_type LIKE 'domain_%' AND d.id IS NULL THEN 'missing_domain'
+                    WHEN inv.id IS NOT NULL THEN 'active_invoice'
+                    ELSE 'unknown'
+                END AS dangling_reason,
+                inv.id AS related_invoice_id,
+                inv.invoice_number AS related_invoice_number,
+                inv.status AS related_invoice_status,
+                CASE
+                    WHEN inv.id IS NOT NULL THEN 0
+                    ELSE 1
+                END AS can_delete
+            FROM billing_pending_items p
+            JOIN local_users u ON u.id = p.user_id
+            LEFT JOIN billing_user_items bui
+                ON p.source_type = 'user_item'
+                AND bui.id = p.source_id
+            LEFT JOIN domains d
+                ON p.source_type LIKE 'domain_%'
+                AND d.id = p.source_id
+            LEFT JOIN (
+                SELECT
+                    ii.billing_reference,
+                    MIN(inv.id) AS invoice_id
+                FROM invoice_items ii
+                JOIN invoices inv
+                    ON inv.id = ii.invoice_id
+                    AND inv.status <> 'cancelled'
+                GROUP BY ii.billing_reference
+            ) invref
+                ON invref.billing_reference = p.billing_reference
+            LEFT JOIN invoices inv
+                ON inv.id = invref.invoice_id
+            WHERE
+                (p.source_type = 'user_item' AND (bui.id IS NULL OR bui.active = 0))
+                OR (p.source_type LIKE 'domain_%' AND d.id IS NULL)
+                OR inv.id IS NOT NULL
+            ORDER BY p.created_at DESC, p.id DESC
+        ")->fetchAll();
     }
 
     public function billingUsersWithPendingItems(): array
@@ -1484,6 +1733,72 @@ final class Repository
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $stmt = $this->pdo->prepare('DELETE FROM billing_pending_items WHERE id IN (' . $placeholders . ')');
         $stmt->execute($ids);
+    }
+
+    public function deletePendingBillingItem(int $id): void
+    {
+        if ($id <= 0) {
+            throw new InvalidArgumentException(t('billing.pending_item_required'));
+        }
+        $stmt = $this->pdo->prepare('
+            SELECT inv.invoice_number
+            FROM billing_pending_items p
+            JOIN invoice_items ii ON ii.billing_reference = p.billing_reference
+            JOIN invoices inv ON inv.id = ii.invoice_id
+            WHERE p.id = ? AND inv.status <> ?
+            LIMIT 1
+        ');
+        $stmt->execute([$id, 'cancelled']);
+        $invoiceNumber = $stmt->fetchColumn();
+        if ($invoiceNumber) {
+            throw new RuntimeException(t('billing.pending_item_has_invoice', ['invoice' => (string)$invoiceNumber]));
+        }
+        $this->deletePendingBillingItems([$id]);
+        $this->audit('admin', 'billing_pending_item_deleted', 'billing_pending_item', $id);
+    }
+
+    private function deleteUnprotectedPendingBillingItemsBySource(string $sourceType, int $sourceId): void
+    {
+        if ($sourceType === '' || $sourceId <= 0) {
+            return;
+        }
+        $stmt = $this->pdo->prepare('
+            DELETE p
+            FROM billing_pending_items p
+            WHERE p.source_type = ?
+                AND p.source_id = ?
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM invoice_items ii
+                    JOIN invoices inv ON inv.id = ii.invoice_id
+                    WHERE ii.billing_reference = p.billing_reference
+                        AND inv.status <> ?
+                )
+        ');
+        $stmt->execute([$sourceType, $sourceId, 'cancelled']);
+    }
+
+    public function deletePendingDomainBillingItems(int $domainId, array $sourceTypes): void
+    {
+        $sourceTypes = array_values(array_unique(array_filter(array_map('strval', $sourceTypes))));
+        if ($domainId <= 0 || $sourceTypes === []) {
+            return;
+        }
+        $placeholders = implode(',', array_fill(0, count($sourceTypes), '?'));
+        $stmt = $this->pdo->prepare(
+            'DELETE p
+            FROM billing_pending_items p
+            WHERE p.source_id = ?
+                AND p.source_type IN (' . $placeholders . ')
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM invoice_items ii
+                    JOIN invoices inv ON inv.id = ii.invoice_id
+                    WHERE ii.billing_reference = p.billing_reference
+                        AND inv.status <> ?
+                )'
+        );
+        $stmt->execute([$domainId, ...$sourceTypes, 'cancelled']);
     }
 
     public function billingLastRunAt(): string
