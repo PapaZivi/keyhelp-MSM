@@ -35,8 +35,16 @@ try {
     $runMessage = $billing->run('cron', true);
     $sendMessage = $billing->sendQueued('cron');
 
-    echo $runMessage . PHP_EOL;
-    echo $sendMessage . PHP_EOL;
+    $messages = [];
+    if ($runMessage !== t('billing.run_result', ['invoices' => 0, 'items' => 0])) {
+        $messages[] = $runMessage;
+    }
+    if ($sendMessage !== t('billing.queue_sent', ['count' => 0])) {
+        $messages[] = $sendMessage;
+    }
+    if ($messages !== []) {
+        echo implode(PHP_EOL, $messages) . PHP_EOL;
+    }
     exit(0);
 } catch (Throwable $exception) {
     log_exception($config, $exception, 'Cron-Rechnungslauf fehlgeschlagen.', ['action' => 'billing_cron']);
